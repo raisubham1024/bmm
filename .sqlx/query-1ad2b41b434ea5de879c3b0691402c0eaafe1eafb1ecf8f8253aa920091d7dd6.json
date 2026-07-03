@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\nSELECT\n    t.name, count(bt.bookmark_id) as num_bookmarks\nFROM\n    tags t\n    LEFT JOIN bookmark_tags bt ON bt.tag_id = t.id\nGROUP BY\n\tt.id\nORDER BY name\n",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "num_bookmarks",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1ad2b41b434ea5de879c3b0691402c0eaafe1eafb1ecf8f8253aa920091d7dd6"
+}

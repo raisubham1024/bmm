@@ -1,0 +1,33 @@
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSL-1.0",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+deny = [
+    "openssl",
+]
+skip = [
+    "getrandom",
+    "linux-raw-sys",
+    "phf_generator",
+    "phf_shared",
+    "rustix",
+    "siphasher",
+    "syn",
+    "wasi",
+    "windows_aarch64_gnullvm",
+    "windows_aarch64_msvc",
+    "windows_i686_gnu",
+    "windows_i686_msvc",
+    "windows_x86_64_gnu",
+    "windows_x86_64_gnullvm",
+    "windows_x86_64_msvc",
+    "windows-sys",
+    "windows-targets",
+]
