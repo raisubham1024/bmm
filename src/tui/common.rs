@@ -9,8 +9,8 @@ pub const TAGS_COLOR: Color = Color::from_u32(0xb8bb26);
 pub const INFO_MESSAGE_COLOR: Color = Color::from_u32(0x83a598);
 pub const ERROR_MESSAGE_COLOR: Color = Color::from_u32(0xfb4934);
 pub const TITLE: &str = " bmm ";
-pub const MIN_TERMINAL_WIDTH: u16 = 96;
-pub const MIN_TERMINAL_HEIGHT: u16 = 24;
+pub const MIN_TERMINAL_WIDTH: u16 = 40;
+pub const MIN_TERMINAL_HEIGHT: u16 = 16;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) enum ActivePane {
