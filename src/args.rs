@@ -97,6 +97,10 @@ pub enum BmmCommand {
             value_delimiter = ','
         )]
         tags: Vec<String>,
+        /// Parent tag/category to prefix every tag with, e.g. "--ptag linux/linuxmint"
+        /// turns "--tags blog" into the hierarchical tag "linux/linuxmint/blog"
+        #[arg(long = "ptag", value_name = "STRING")]
+        ptag: Option<String>,
         /// Provide details via a text editor
         #[arg(short = 'e', long = "editor")]
         use_editor: bool,
@@ -123,6 +127,10 @@ pub enum BmmCommand {
             value_delimiter = ','
         )]
         tags: Vec<String>,
+        /// Parent tag/category to prefix every tag with, e.g. "--ptag linux/linuxmint"
+        /// turns "--tags blog" into the hierarchical tag "linux/linuxmint/blog"
+        #[arg(long = "ptag", value_name = "STRING")]
+        ptag: Option<String>,
         /// Read input from stdin
         #[arg(short = 's', long = "stdin")]
         use_stdin: bool,
@@ -290,6 +298,7 @@ ignore attribute errors   : {ignore_attribute_errors}
                 uri,
                 title,
                 tags,
+                ptag,
                 use_editor,
                 fail_if_uri_already_saved,
                 reset_missing,
@@ -300,6 +309,7 @@ command                   : Save/update bookmark
 URI                       : {}
 title                     : {}
 tags                      : {}
+parent tag                : {}
 use editor                : {}
 fail if URI already saved : {}
 reset missing             : {}
@@ -308,6 +318,7 @@ ignore attribute errors   : {}
                 uri,
                 title.as_deref().unwrap_or(NOT_PROVIDED),
                 tags.join(" "),
+                ptag.as_deref().unwrap_or(NOT_PROVIDED),
                 use_editor,
                 fail_if_uri_already_saved,
                 reset_missing,
@@ -316,6 +327,7 @@ ignore attribute errors   : {}
             BmmCommand::SaveAll {
                 uris,
                 tags,
+                ptag,
                 use_stdin,
                 reset_missing,
                 ignore_attribute_errors,
@@ -324,12 +336,14 @@ ignore attribute errors   : {}
 command                   : Save/update bookmarks
 URIs                      : {}
 tags                      : {}
+parent tag                : {}
 use stdin                 : {}
 reset missing             : {}
 ignore attribute errors   : {}
 "#,
                 uris.as_ref().map_or(NOT_PROVIDED.into(), |u| u.join(" ")),
                 tags.join(" "),
+                ptag.as_deref().unwrap_or(NOT_PROVIDED),
                 use_stdin,
                 reset_missing,
                 ignore_attribute_errors,

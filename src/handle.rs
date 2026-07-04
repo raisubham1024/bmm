@@ -11,6 +11,25 @@ use std::path::PathBuf;
 const DATA_DIR: &str = "bmm";
 const DATA_FILE: &str = "bmm.db";
 
+/// If a parent tag (`--ptag`) is provided, prefix every given tag with it
+/// using "/" as the separator, e.g. ptag "linux/linuxmint" + tag "blog"
+/// becomes "linux/linuxmint/blog". Tags are validated later downstream as
+/// usual, so an invalid combination will still surface a normal error.
+fn apply_parent_tag(tags: Vec<String>, ptag: Option<&str>) -> Vec<String> {
+    match ptag {
+        None => tags,
+        Some(p) => {
+            let p = p.trim().trim_matches('/');
+            if p.is_empty() {
+                return tags;
+            }
+            tags.into_iter()
+                .map(|t| format!("{}/{}", p, t.trim()))
+                .collect()
+        }
+    }
+}
+
 pub async fn handle(args: Args) -> Result<(), AppError> {
     let db_path = match &args.db_path {
         Some(p) => PathBuf::from(p),
@@ -81,11 +100,13 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
             uri,
             title,
             tags,
+            ptag,
             use_editor,
             fail_if_uri_already_saved,
             reset_missing,
             ignore_attribute_errors,
         } => {
+            let tags = apply_parent_tag(tags, ptag.as_deref());
             let potential_bookmark = PotentialBookmark::from((uri, title, &tags));
 
             save_bookmark(
@@ -102,10 +123,12 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
         BmmCommand::SaveAll {
             uris,
             tags,
+            ptag,
             use_stdin,
             reset_missing,
             ignore_attribute_errors,
         } => {
+            let tags = apply_parent_tag(tags, ptag.as_deref());
             let result = save_all_bookmarks(
                 &pool,
                 uris,

@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Serialize;
 
-pub const TAG_REGEX_STR: &str = r"^[a-zA-Z0-9_-]{1,30}$";
+pub const TAG_REGEX_STR: &str = r"^[a-zA-Z0-9_-]{1,30}(/[a-zA-Z0-9_-]{1,30}){0,3}$";
 
 #[derive(PartialEq, Eq, Serialize, Debug, PartialOrd, Ord)]
 pub struct Tag(String);
@@ -10,6 +10,14 @@ pub struct Tag(String);
 impl Tag {
     pub fn name(&self) -> &str {
         self.0.as_str()
+    }
+
+    pub fn top_level_category(&self) -> &str {
+        self.0.split('/').next().unwrap_or(&self.0)
+    }
+
+    pub fn is_hierarchical(&self) -> bool {
+        self.0.contains('/')
     }
 }
 
