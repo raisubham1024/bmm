@@ -351,31 +351,6 @@ want):
    ./bmm
    # profit!
    ```
-
-🙏 Acknowledgements
----
-
-`bmm` sits on the shoulders of the following crates:
-
-- [clap](https://crates.io/crates/clap)
-- [csv](https://crates.io/crates/csv)
-- [dirs](https://crates.io/crates/dirs)
-- [lazy_static](https://crates.io/crates/lazy_static)
-- [once_cell](https://crates.io/crates/once_cell)
-- [open](https://crates.io/crates/open)
-- [ratatui](https://crates.io/crates/ratatui)
-- [regex](https://crates.io/crates/regex)
-- [select](https://crates.io/crates/select)
-- [serde](https://crates.io/crates/serde)
-- [serde_json](https://crates.io/crates/serde_json)
-- [sqlx](https://crates.io/crates/sqlx)
-- [tempfile](https://crates.io/crates/tempfile)
-- [thiserror](https://crates.io/crates/thiserror)
-- [tokio](https://crates.io/crates/tokio)
-- [input](https://crates.io/crates/tui-input)
-- [url](https://crates.io/crates/url)
-- [which](https://crates.io/crates/which)
-
 [1]: https://github.com/dhth/bmm/releases
 [2]: https://github.blog/news-insights/product-news/introducing-artifact-attestations-now-in-public-beta/
 [3]: https://github.com/cli/cli
