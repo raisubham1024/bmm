@@ -9,6 +9,7 @@ const IMPORT_HELP: &str = include_str!("static/import-help.txt");
 /// bmm lets you get to your bookmarks in a flash
 #[derive(Parser, Debug)]
 #[command(long_about = LONG_ABOUT.trim())]
+#[command(version)]
 pub struct Args {
     #[command(subcommand)]
     pub command: BmmCommand,
