@@ -17,6 +17,7 @@ pub(crate) enum ActivePane {
     List,
     TagsList,
     SearchInput,
+    TagSearchInput,
     Help,
 }
 

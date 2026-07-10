@@ -163,11 +163,13 @@ pub(super) struct Model {
     pub(super) active_pane: ActivePane,
     pub(super) bookmark_items: BookmarkItems,
     pub(super) tag_items: TagItems,
+    pub(super) all_tag_items: Vec<TagStats>,
     pub(super) running_state: RunningState,
     pub(super) user_message: Option<UserMessage>,
     pub(super) render_counter: u64,
     pub(super) event_counter: u64,
     pub(super) search_input: Input,
+    pub(super) tag_search_input: Input,
     pub(super) initial: bool,
     pub(super) terminal_dimensions: TerminalDimensions,
     pub(super) terminal_too_small: bool,
@@ -199,10 +201,12 @@ impl Model {
             running_state: RunningState::Running,
             bookmark_items: BookmarkItems::default(),
             tag_items: TagItems::default(),
+            all_tag_items: vec![],
             user_message: None,
             render_counter: 0,
             event_counter: 0,
             search_input: Input::default(),
+            tag_search_input: Input::default(),
             initial,
             terminal_dimensions,
             terminal_too_small,
@@ -213,7 +217,9 @@ impl Model {
     pub(super) fn select_next_list_item(&mut self) {
         match self.active_pane {
             ActivePane::List => self.bookmark_items.state.select_next(),
-            ActivePane::TagsList => self.tag_items.state.select_next(),
+            ActivePane::TagsList | ActivePane::TagSearchInput => {
+                self.tag_items.state.select_next()
+            }
             ActivePane::SearchInput => {}
             ActivePane::Help => {}
         }
@@ -222,7 +228,9 @@ impl Model {
     pub(super) fn select_previous_list_item(&mut self) {
         match self.active_pane {
             ActivePane::List => self.bookmark_items.state.select_previous(),
-            ActivePane::TagsList => self.tag_items.state.select_previous(),
+            ActivePane::TagsList | ActivePane::TagSearchInput => {
+                self.tag_items.state.select_previous()
+            }
             ActivePane::SearchInput => {}
             ActivePane::Help => {}
         }
@@ -231,7 +239,9 @@ impl Model {
     pub(super) fn select_first_list_item(&mut self) {
         match self.active_pane {
             ActivePane::List => self.bookmark_items.state.select_first(),
-            ActivePane::TagsList => self.tag_items.state.select_first(),
+            ActivePane::TagsList | ActivePane::TagSearchInput => {
+                self.tag_items.state.select_first()
+            }
             ActivePane::SearchInput => {}
             ActivePane::Help => {}
         }
@@ -239,7 +249,9 @@ impl Model {
     pub(super) fn select_last_list_item(&mut self) {
         match self.active_pane {
             ActivePane::List => self.bookmark_items.state.select_last(),
-            ActivePane::TagsList => self.tag_items.state.select_last(),
+            ActivePane::TagsList | ActivePane::TagSearchInput => {
+                self.tag_items.state.select_last()
+            }
             ActivePane::SearchInput => {}
             ActivePane::Help => {}
         }
@@ -250,6 +262,7 @@ impl Model {
             ActivePane::Help => ActivePane::List,
             ActivePane::List => view,
             ActivePane::TagsList => view,
+            ActivePane::TagSearchInput => view,
             ActivePane::SearchInput => view,
         };
 
@@ -263,6 +276,7 @@ impl Model {
                     None
                 }
             }
+            ActivePane::TagSearchInput => None,
             ActivePane::SearchInput => None,
         }
     }
@@ -280,6 +294,9 @@ impl Model {
                 self.search_input.reset();
                 self.active_pane = ActivePane::List;
             }
+            ActivePane::TagSearchInput => {
+                self.cancel_tag_search();
+            }
             ActivePane::TagsList => {
                 if self.bookmark_items.items.is_empty() {
                     self.running_state = RunningState::Done;
@@ -288,6 +305,32 @@ impl Model {
                 }
             }
         };
+    }
+
+    pub(super) fn filter_tags(&mut self) {
+        let query = self.tag_search_input.value().trim().to_lowercase();
+
+        let filtered: Vec<TagStats> = if query.is_empty() {
+            self.all_tag_items.clone()
+        } else {
+            self.all_tag_items
+                .iter()
+                .filter(|t| t.name.to_lowercase().contains(&query))
+                .cloned()
+                .collect()
+        };
+
+        self.tag_items = TagItems::from(filtered);
+    }
+
+    pub(super) fn cancel_tag_search(&mut self) {
+        self.tag_search_input.reset();
+        self.tag_items = TagItems::from(self.all_tag_items.clone());
+        self.active_pane = ActivePane::TagsList;
+    }
+
+    pub(super) fn confirm_tag_search(&mut self) {
+        self.active_pane = ActivePane::TagsList;
     }
 
     pub(super) fn get_cmd_to_open_selection_in_browser(&self) -> Option<Command> {

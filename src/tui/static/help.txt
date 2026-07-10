@@ -22,4 +22,5 @@ Bookmarks List View
     Y                    copy all URIs to system clipboard
 
 Tags List View
+    /                    show tag search input
     Enter                show bookmarks that are tagged with the one under cursor

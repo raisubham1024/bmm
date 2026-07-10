@@ -32,7 +32,8 @@ pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
                 render_list_view(model, frame, true);
             }
         }
-        ActivePane::TagsList => render_tag_list_view(model, frame),
+        ActivePane::TagsList => render_tag_list_view(model, frame, false),
+        ActivePane::TagSearchInput => render_tag_list_view(model, frame, true),
     }
 }
 
@@ -124,7 +125,7 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                 Style::new().bold().bg(HELP_COLOR).fg(FG_COLOR),
             ));
         }
-        ActivePane::TagsList => {
+        ActivePane::TagsList | ActivePane::TagSearchInput => {
             if model.tag_items.items.is_empty() {
                 header_components.push(Span::styled(
                     " no tags ",
@@ -203,6 +204,17 @@ fn render_search_input(model: &Model, frame: &mut Frame, chunk: Rect) {
             Block::bordered()
                 .title(" search query? ")
                 .title_style(Style::new().bold().bg(COLOR_THREE).fg(FG_COLOR)),
+        );
+    frame.render_widget(input, chunk);
+}
+
+fn render_tag_search_input(model: &Model, frame: &mut Frame, chunk: Rect) {
+    let input = Paragraph::new(model.tag_search_input.value())
+        .style(Style::default().fg(TAGS_COLOR))
+        .block(
+            Block::bordered()
+                .title(" search tags? ")
+                .title_style(Style::new().bold().bg(TAGS_COLOR).fg(FG_COLOR)),
         );
     frame.render_widget(input, chunk);
 }
@@ -403,21 +415,43 @@ fn render_list_view(model: &mut Model, frame: &mut Frame, search: bool) {
     }
 }
 
-fn render_tag_list_view(model: &mut Model, frame: &mut Frame) {
-    let layout = Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints(vec![
-            Constraint::Length(2),
-            Constraint::Min(16),
-            Constraint::Length(5),
-            Constraint::Length(1),
-        ])
-        .split(frame.area());
+fn render_tag_list_view(model: &mut Model, frame: &mut Frame, search: bool) {
+    match search {
+        true => {
+            let layout = Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints(vec![
+                    Constraint::Length(2),
+                    Constraint::Min(12),
+                    Constraint::Length(5),
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                ])
+                .split(frame.area());
 
-    render_header(model, frame, layout[0]);
-    render_tag_list(model, frame, layout[1]);
-    render_tag_details(model, frame, layout[2]);
-    render_status_line(model, frame, layout[3]);
+            render_header(model, frame, layout[0]);
+            render_tag_list(model, frame, layout[1]);
+            render_tag_details(model, frame, layout[2]);
+            render_tag_search_input(model, frame, layout[3]);
+            render_status_line(model, frame, layout[4]);
+        }
+        false => {
+            let layout = Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints(vec![
+                    Constraint::Length(2),
+                    Constraint::Min(16),
+                    Constraint::Length(5),
+                    Constraint::Length(1),
+                ])
+                .split(frame.area());
+
+            render_header(model, frame, layout[0]);
+            render_tag_list(model, frame, layout[1]);
+            render_tag_details(model, frame, layout[2]);
+            render_status_line(model, frame, layout[3]);
+        }
+    }
 }
 
 fn render_help_view(model: &mut Model, frame: &mut Frame) {

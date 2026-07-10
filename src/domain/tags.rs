@@ -48,7 +48,7 @@ impl TryFrom<&str> for Tag {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct TagStats {
     pub name: String,
     pub num_bookmarks: i64,

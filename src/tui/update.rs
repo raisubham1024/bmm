@@ -52,6 +52,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         },
         Message::TagsFetched(result) => match result {
             Ok(t) => {
+                model.all_tag_items = t.clone();
                 model.tag_items = TagItems::from(t);
                 model.active_pane = ActivePane::TagsList;
             }
@@ -59,6 +60,16 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         },
         Message::SearchInputGotEvent(event) => {
             model.search_input.handle_event(&event);
+        }
+        Message::TagSearchInputGotEvent(event) => {
+            model.tag_search_input.handle_event(&event);
+            model.filter_tags();
+        }
+        Message::SubmitTagSearch => {
+            model.confirm_tag_search();
+        }
+        Message::CancelTagSearch => {
+            model.cancel_tag_search();
         }
         Message::SubmitSearch => {
             let search_query = model.search_input.value();
