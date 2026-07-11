@@ -2,7 +2,7 @@ use super::common::ActivePane;
 use super::model::Model;
 use crate::domain::{SavedBookmark, TagStats};
 use crate::persistence::DBError;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use std::io::Error as IOError;
 
 pub enum Message {
@@ -12,8 +12,10 @@ pub enum Message {
     GoToFirstListItem,
     GoToLastListItem,
     OpenInBrowser,
+    RequestOpenAllInBrowser,
     UrlsOpenedInBrowser(UrlsOpenedResult),
     SearchFinished(Result<Vec<SavedBookmark>, DBError>),
+    AllBookmarksFetched(Result<Vec<SavedBookmark>, DBError>),
     TagsFetched(Result<Vec<TagStats>, DBError>),
     ShowView(ActivePane),
     SearchInputGotEvent(Event),
@@ -25,6 +27,19 @@ pub enum Message {
     SubmitSearch,
     ShowBookmarksForTag,
     BookmarksForTagFetched(Result<Vec<SavedBookmark>, DBError>),
+    ShowDuplicates,
+    DuplicateBookmarksFetched(Result<Vec<SavedBookmark>, DBError>),
+    RequestDeleteBookmark,
+    BookmarkDeleted(Result<u64, DBError>),
+    StartEditBookmark,
+    EditFieldGotEvent(Event),
+    EditFieldNext,
+    EditFieldPrev,
+    RequestSaveBookmarkEdit,
+    RequestExitEdit,
+    BookmarkUpdated(Result<(), String>),
+    ConfirmYes,
+    ConfirmNo,
     ContentCopiedToClipboard(Result<(), String>),
     GoBackOrQuit,
 }
@@ -52,10 +67,14 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('g') => Some(Message::GoToFirstListItem),
                         KeyCode::Char('G') => Some(Message::GoToLastListItem),
                         KeyCode::Char('o') => Some(Message::OpenInBrowser),
+                        KeyCode::Char('O') => Some(Message::RequestOpenAllInBrowser),
                         KeyCode::Char('s') => Some(Message::ShowView(ActivePane::SearchInput)),
                         KeyCode::Char('t') | KeyCode::Tab => {
                             Some(Message::ShowView(ActivePane::TagsList))
                         }
+                        KeyCode::Char('d') => Some(Message::ShowDuplicates),
+                        KeyCode::Char('e') => Some(Message::StartEditBookmark),
+                        KeyCode::Delete => Some(Message::RequestDeleteBookmark),
                         KeyCode::Char('y') => Some(Message::CopyURIToClipboard),
                         KeyCode::Char('Y') => Some(Message::CopyURIsToClipboard),
                         KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
@@ -90,6 +109,24 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Down => Some(Message::GoToNextListItem),
                         KeyCode::Up => Some(Message::GoToPreviousListItem),
                         _ => Some(Message::TagSearchInputGotEvent(event)),
+                    },
+                    ActivePane::EditBookmark => match key_event.code {
+                        KeyCode::Esc => Some(Message::RequestExitEdit),
+                        KeyCode::Tab | KeyCode::Down => Some(Message::EditFieldNext),
+                        KeyCode::BackTab | KeyCode::Up => Some(Message::EditFieldPrev),
+                        KeyCode::Char('s')
+                            if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            Some(Message::RequestSaveBookmarkEdit)
+                        }
+                        _ => Some(Message::EditFieldGotEvent(event)),
+                    },
+                    ActivePane::Confirm => match key_event.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => Some(Message::ConfirmYes),
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            Some(Message::ConfirmNo)
+                        }
+                        _ => None,
                     },
                 },
                 _ => None,

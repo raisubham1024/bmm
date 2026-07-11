@@ -279,8 +279,8 @@ bmm check
 # only check bookmarks that have a given tag
 bmm check --tags golang
 
-# only show broken links in the output
-bmm check --only-broken
+# by default, only broken links are shown; pass --show-all to see everything
+bmm check --show-all
 
 # check more links at the same time, and give up on slow ones sooner
 bmm check --concurrency 20 --timeout 5

@@ -158,6 +158,14 @@ impl From<&TagStats> for ListItem<'_> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(super) enum PendingConfirmation {
+    DeleteBookmark(String),
+    SaveEdit,
+    DiscardEdit,
+    TooManyLinksWarning(usize),
+}
+
 pub(super) struct Model {
     pub(super) pool: Pool<Sqlite>,
     pub(super) active_pane: ActivePane,
@@ -174,6 +182,15 @@ pub(super) struct Model {
     pub(super) terminal_dimensions: TerminalDimensions,
     pub(super) terminal_too_small: bool,
     pub(super) debug: bool,
+    pub(super) pending_confirmation: Option<PendingConfirmation>,
+    pub(super) pane_before_confirm: ActivePane,
+    pub(super) edit_uri: String,
+    pub(super) edit_title_input: Input,
+    pub(super) edit_tags_input: Input,
+    pub(super) edit_focus: EditField,
+    pub(super) edit_original_title: Option<String>,
+    pub(super) edit_original_tags: Option<String>,
+    pub(super) viewing_duplicates: bool,
 }
 
 impl Model {
@@ -211,6 +228,15 @@ impl Model {
             terminal_dimensions,
             terminal_too_small,
             debug,
+            pending_confirmation: None,
+            pane_before_confirm: ActivePane::List,
+            edit_uri: String::new(),
+            edit_title_input: Input::default(),
+            edit_tags_input: Input::default(),
+            edit_focus: EditField::Title,
+            edit_original_title: None,
+            edit_original_tags: None,
+            viewing_duplicates: false,
         }
     }
 
@@ -221,6 +247,8 @@ impl Model {
                 self.tag_items.state.select_next()
             }
             ActivePane::SearchInput => {}
+            ActivePane::EditBookmark => {}
+            ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
     }
@@ -232,6 +260,8 @@ impl Model {
                 self.tag_items.state.select_previous()
             }
             ActivePane::SearchInput => {}
+            ActivePane::EditBookmark => {}
+            ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
     }
@@ -243,6 +273,8 @@ impl Model {
                 self.tag_items.state.select_first()
             }
             ActivePane::SearchInput => {}
+            ActivePane::EditBookmark => {}
+            ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
     }
@@ -253,6 +285,8 @@ impl Model {
                 self.tag_items.state.select_last()
             }
             ActivePane::SearchInput => {}
+            ActivePane::EditBookmark => {}
+            ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
     }
@@ -264,6 +298,8 @@ impl Model {
             ActivePane::TagsList => view,
             ActivePane::TagSearchInput => view,
             ActivePane::SearchInput => view,
+            ActivePane::EditBookmark => view,
+            ActivePane::Confirm => view,
         };
 
         match view {
@@ -278,6 +314,8 @@ impl Model {
             }
             ActivePane::TagSearchInput => None,
             ActivePane::SearchInput => None,
+            ActivePane::EditBookmark => None,
+            ActivePane::Confirm => None,
         }
     }
 
@@ -296,6 +334,12 @@ impl Model {
             }
             ActivePane::TagSearchInput => {
                 self.cancel_tag_search();
+            }
+            ActivePane::EditBookmark => {
+                self.cancel_edit();
+            }
+            ActivePane::Confirm => {
+                self.cancel_confirm();
             }
             ActivePane::TagsList => {
                 if self.bookmark_items.items.is_empty() {
@@ -345,6 +389,32 @@ impl Model {
         Some(Command::OpenInBrowser(url))
     }
 
+    pub(super) fn request_open_all_in_browser(&mut self) -> Option<Command> {
+        if self.active_pane != ActivePane::List {
+            return None;
+        }
+
+        let uris: Vec<String> = self
+            .bookmark_items
+            .items
+            .iter()
+            .map(|bi| bi.bookmark.uri.clone())
+            .collect();
+
+        if uris.is_empty() {
+            return None;
+        }
+
+        if uris.len() > MAX_BULK_OPEN_LINKS {
+            self.pending_confirmation = Some(PendingConfirmation::TooManyLinksWarning(uris.len()));
+            self.pane_before_confirm = ActivePane::List;
+            self.active_pane = ActivePane::Confirm;
+            None
+        } else {
+            Some(Command::OpenMultipleInBrowser(uris))
+        }
+    }
+
     pub(super) fn get_uri_under_cursor(&self) -> Option<String> {
         if let ActivePane::List = self.active_pane {
             self.bookmark_items
@@ -354,6 +424,182 @@ impl Model {
                 .map(|bi| bi.bookmark.uri.clone())
         } else {
             None
+        }
+    }
+
+    //-------------------------------//
+    //  delete (with confirmation)   //
+    //-------------------------------//
+
+    pub(super) fn request_delete_selected_bookmark(&mut self) {
+        if self.active_pane != ActivePane::List {
+            return;
+        }
+
+        let uri = self
+            .bookmark_items
+            .state
+            .selected()
+            .and_then(|i| self.bookmark_items.items.get(i))
+            .map(|item| item.bookmark.uri.clone());
+
+        if let Some(uri) = uri {
+            self.pending_confirmation = Some(PendingConfirmation::DeleteBookmark(uri));
+            self.pane_before_confirm = ActivePane::List;
+            self.active_pane = ActivePane::Confirm;
+        }
+    }
+
+    pub(super) fn remove_bookmark_by_uri(&mut self, uri: &str) {
+        if let Some(pos) = self
+            .bookmark_items
+            .items
+            .iter()
+            .position(|item| item.bookmark.uri == uri)
+        {
+            self.bookmark_items.items.remove(pos);
+
+            let len = self.bookmark_items.items.len();
+            if len == 0 {
+                self.bookmark_items.state.select(None);
+            } else if let Some(selected) = self.bookmark_items.state.selected()
+                && selected >= len
+            {
+                self.bookmark_items.state.select(Some(len - 1));
+            }
+        }
+    }
+
+    //-------------------------------//
+    //  editing a bookmark            //
+    //-------------------------------//
+
+    pub(super) fn start_edit_selected_bookmark(&mut self) {
+        if self.active_pane != ActivePane::List {
+            return;
+        }
+
+        let details: Option<(String, Option<String>, Option<String>)> =
+            self.bookmark_items.state.selected().and_then(|i| {
+                self.bookmark_items.items.get(i).map(|item| {
+                    (
+                        item.bookmark.uri.clone(),
+                        item.bookmark.title.clone(),
+                        item.bookmark.tags.clone(),
+                    )
+                })
+            });
+
+        if let Some((uri, title, tags)) = details {
+            self.edit_uri = uri;
+            self.edit_title_input = Input::new(title.clone().unwrap_or_default());
+            self.edit_tags_input = Input::new(tags.clone().unwrap_or_default());
+            self.edit_original_title = title;
+            self.edit_original_tags = tags;
+            self.edit_focus = EditField::Title;
+            self.active_pane = ActivePane::EditBookmark;
+        }
+    }
+
+    pub(super) fn edit_focus_next(&mut self) {
+        self.edit_focus = match self.edit_focus {
+            EditField::Title => EditField::Tags,
+            EditField::Tags => EditField::Title,
+        };
+    }
+
+    pub(super) fn edit_focus_previous(&mut self) {
+        // there are only two fields, so moving to the "previous" one is the
+        // same as moving to the "next" one
+        self.edit_focus_next();
+    }
+
+    pub(super) fn edit_has_changes(&self) -> bool {
+        let title_now = self.edit_title_input.value().trim();
+        let tags_now = self.edit_tags_input.value().trim();
+
+        let title_before = self.edit_original_title.as_deref().unwrap_or("").trim();
+        let tags_before = self.edit_original_tags.as_deref().unwrap_or("").trim();
+
+        title_now != title_before || tags_now != tags_before
+    }
+
+    pub(super) fn cancel_edit(&mut self) {
+        self.edit_title_input.reset();
+        self.edit_tags_input.reset();
+        self.edit_uri.clear();
+        self.edit_original_title = None;
+        self.edit_original_tags = None;
+        self.edit_focus = EditField::Title;
+        self.active_pane = ActivePane::List;
+    }
+
+    pub(super) fn request_save_edit(&mut self) {
+        if self.active_pane != ActivePane::EditBookmark {
+            return;
+        }
+
+        if !self.edit_has_changes() {
+            self.user_message = Some(UserMessage::info("nothing to save").with_frames_left(1));
+            return;
+        }
+
+        self.pending_confirmation = Some(PendingConfirmation::SaveEdit);
+        self.pane_before_confirm = ActivePane::EditBookmark;
+        self.active_pane = ActivePane::Confirm;
+    }
+
+    pub(super) fn request_exit_edit(&mut self) {
+        if self.active_pane != ActivePane::EditBookmark {
+            return;
+        }
+
+        if self.edit_has_changes() {
+            self.pending_confirmation = Some(PendingConfirmation::DiscardEdit);
+            self.pane_before_confirm = ActivePane::EditBookmark;
+            self.active_pane = ActivePane::Confirm;
+        } else {
+            self.cancel_edit();
+        }
+    }
+
+    pub(super) fn apply_bookmark_edit_locally(&mut self, title: Option<String>, tags: Option<String>) {
+        let target_uri = self.edit_uri.clone();
+        if let Some(item) = self
+            .bookmark_items
+            .items
+            .iter_mut()
+            .find(|item| item.bookmark.uri == target_uri)
+        {
+            item.bookmark.title = title;
+            item.bookmark.tags = tags;
+        }
+    }
+
+    //-------------------------------//
+    //  generic confirmation dialog  //
+    //-------------------------------//
+
+    pub(super) fn cancel_confirm(&mut self) {
+        self.pending_confirmation = None;
+        self.active_pane = self.pane_before_confirm;
+    }
+
+    pub(super) fn confirm_message(&self) -> String {
+        match &self.pending_confirmation {
+            Some(PendingConfirmation::DeleteBookmark(uri)) => {
+                format!("delete this bookmark?\n\n{uri}")
+            }
+            Some(PendingConfirmation::SaveEdit) => "save changes to this bookmark?".to_string(),
+            Some(PendingConfirmation::DiscardEdit) => {
+                "discard unsaved changes to this bookmark?".to_string()
+            }
+            Some(PendingConfirmation::TooManyLinksWarning(count)) => {
+                format!(
+                    "Total links are {count}, which is more than {MAX_BULK_OPEN_LINKS}.\nOpening this many links at once could cause problems with your browser.\n\nPlease narrow your search/results and try again."
+                )
+            }
+            None => String::new(),
         }
     }
 }

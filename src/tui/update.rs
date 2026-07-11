@@ -15,6 +15,11 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 cmds.push(c)
             }
         }
+        Message::RequestOpenAllInBrowser => {
+            if let Some(c) = model.request_open_all_in_browser() {
+                cmds.push(c);
+            }
+        }
         Message::UrlsOpenedInBrowser(result) => {
             if let UrlsOpenedResult::Failure(e) = result {
                 model.user_message =
@@ -31,6 +36,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         Message::GoToLastListItem => model.select_last_list_item(),
         Message::SearchFinished(result) => match result {
             Ok(bookmarks) => {
+                model.viewing_duplicates = false;
                 if bookmarks.is_empty() {
                     model.user_message = Some(UserMessage::info("no bookmarks found for query"));
                     model.bookmark_items = BookmarkItems::from(vec![]);
@@ -46,6 +52,18 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                     } else {
                         model.bookmark_items = BookmarkItems::from(bookmarks);
                     }
+                }
+            }
+            Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
+        },
+        Message::AllBookmarksFetched(result) => match result {
+            Ok(bookmarks) => {
+                model.viewing_duplicates = false;
+                if bookmarks.is_empty() {
+                    model.user_message = Some(UserMessage::info("no bookmarks saved yet"));
+                    model.bookmark_items = BookmarkItems::from(vec![]);
+                } else {
+                    model.bookmark_items = BookmarkItems::from(bookmarks);
                 }
             }
             Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
@@ -73,18 +91,25 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         }
         Message::SubmitSearch => {
             let search_query = model.search_input.value();
-            match SearchTerms::try_from(search_query) {
-                Ok(search_terms) => {
-                    if !search_query.is_empty() {
+            if search_query.trim().is_empty() {
+                cmds.push(Command::FetchAllBookmarks);
+                if model.initial {
+                    model.initial = false;
+                }
+                model.search_input.reset();
+                model.active_pane = ActivePane::List;
+            } else {
+                match SearchTerms::try_from(search_query) {
+                    Ok(search_terms) => {
                         cmds.push(Command::SearchBookmarks(search_terms));
                         if model.initial {
                             model.initial = false;
                         }
+                        model.search_input.reset();
+                        model.active_pane = ActivePane::List;
                     }
-                    model.search_input.reset();
-                    model.active_pane = ActivePane::List;
+                    Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
                 }
-                Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
             }
         }
         Message::TerminalResize(width, height) => {
@@ -101,11 +126,135 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         }
         Message::BookmarksForTagFetched(result) => match result {
             Ok(bookmarks) => {
+                model.viewing_duplicates = false;
                 model.bookmark_items = BookmarkItems::from(bookmarks);
                 model.active_pane = ActivePane::List;
             }
             Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
         },
+        Message::ShowDuplicates => {
+            cmds.push(Command::FetchDuplicateBookmarks);
+        }
+        Message::DuplicateBookmarksFetched(result) => match result {
+            Ok(bookmarks) => {
+                model.viewing_duplicates = true;
+                if bookmarks.is_empty() {
+                    model.user_message = Some(UserMessage::info("no duplicate bookmarks found"));
+                    model.bookmark_items = BookmarkItems::from(vec![]);
+                } else {
+                    model.bookmark_items = BookmarkItems::from(bookmarks);
+                }
+                model.active_pane = ActivePane::List;
+            }
+            Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
+        },
+        Message::RequestDeleteBookmark => {
+            model.request_delete_selected_bookmark();
+        }
+        Message::BookmarkDeleted(result) => match result {
+            Ok(_) => {
+                if let Some(PendingConfirmation::DeleteBookmark(uri)) =
+                    model.pending_confirmation.take()
+                {
+                    if model.viewing_duplicates {
+                        // a bookmark that was part of a duplicate-title group
+                        // was just deleted; the remaining bookmark(s) that
+                        // shared that title may no longer be duplicates, so
+                        // refresh the list from the database instead of
+                        // just removing this one item locally.
+                        cmds.push(Command::FetchDuplicateBookmarks);
+                    } else {
+                        model.remove_bookmark_by_uri(&uri);
+                    }
+                }
+                model.user_message =
+                    Some(UserMessage::info("bookmark deleted!").with_frames_left(1));
+            }
+            Err(e) => {
+                model.pending_confirmation = None;
+                model.user_message = Some(UserMessage::error(&format!(
+                    "couldn't delete bookmark: {e}"
+                )));
+            }
+        },
+        Message::StartEditBookmark => {
+            model.start_edit_selected_bookmark();
+        }
+        Message::EditFieldGotEvent(event) => match model.edit_focus {
+            EditField::Title => {
+                model.edit_title_input.handle_event(&event);
+            }
+            EditField::Tags => {
+                model.edit_tags_input.handle_event(&event);
+            }
+        },
+        Message::EditFieldNext => model.edit_focus_next(),
+        Message::EditFieldPrev => model.edit_focus_previous(),
+        Message::RequestSaveBookmarkEdit => {
+            model.request_save_edit();
+        }
+        Message::RequestExitEdit => {
+            model.request_exit_edit();
+        }
+        Message::BookmarkUpdated(result) => match result {
+            Ok(()) => {
+                let title = {
+                    let t = model.edit_title_input.value().trim();
+                    if t.is_empty() { None } else { Some(t.to_string()) }
+                };
+                let tags = {
+                    let t = model.edit_tags_input.value().trim();
+                    if t.is_empty() { None } else { Some(t.to_string()) }
+                };
+                model.apply_bookmark_edit_locally(title, tags);
+                model.cancel_edit();
+                model.user_message =
+                    Some(UserMessage::info("bookmark updated!").with_frames_left(1));
+            }
+            Err(e) => {
+                model.user_message =
+                    Some(UserMessage::error(&format!("couldn't update bookmark: {e}")));
+            }
+        },
+        Message::ConfirmYes => {
+            if let Some(confirmation) = model.pending_confirmation.take() {
+                match confirmation {
+                    PendingConfirmation::DeleteBookmark(uri) => {
+                        cmds.push(Command::DeleteBookmark(uri));
+                        model.active_pane = ActivePane::List;
+                    }
+                    PendingConfirmation::SaveEdit => {
+                        let title = {
+                            let t = model.edit_title_input.value().trim();
+                            if t.is_empty() { None } else { Some(t.to_string()) }
+                        };
+                        let tags: Vec<String> = model
+                            .edit_tags_input
+                            .value()
+                            .split(',')
+                            .map(|t| t.trim().to_string())
+                            .filter(|t| !t.is_empty())
+                            .collect();
+
+                        cmds.push(Command::UpdateBookmark {
+                            uri: model.edit_uri.clone(),
+                            title,
+                            tags,
+                        });
+                        model.active_pane = ActivePane::EditBookmark;
+                    }
+                    PendingConfirmation::DiscardEdit => {
+                        model.cancel_edit();
+                    }
+                    PendingConfirmation::TooManyLinksWarning(_) => {
+                        model.active_pane = model.pane_before_confirm;
+                    }
+                }
+            }
+        }
+        Message::ConfirmNo => {
+            model.cancel_confirm();
+        }
         Message::CopyURIToClipboard => {
             if let Some(uri) = model.get_uri_under_cursor() {
                 cmds.push(Command::CopyContentToClipboard(uri));

@@ -631,9 +631,60 @@ ORDER BY name
     Ok(tag_names)
 }
 
-#[cfg(test)]
 pub async fn get_all_bookmarks(pool: &Pool<Sqlite>) -> Result<Vec<SavedBookmark>, DBError> {
     get_bookmarks(pool, None, None, vec![], 1000).await
+}
+
+/// Returns bookmarks that share a title with at least one other bookmark.
+///
+/// Note: a bookmark's URI is guaranteed unique by the database schema, so
+/// "duplicate" here is defined as bookmarks that have the same (non-empty)
+/// title, since that's the practical way two saved bookmarks can end up
+/// pointing at what's effectively the same thing (eg. the same article
+/// saved under two slightly different URLs).
+pub async fn get_duplicate_bookmarks(pool: &Pool<Sqlite>) -> Result<Vec<SavedBookmark>, DBError> {
+    let bookmarks = sqlx::query_as::<_, SavedBookmark>(
+        r#"
+SELECT
+    uri,
+    title,
+    (
+        SELECT
+            GROUP_CONCAT(t.name, ',' ORDER BY t.name ASC)
+        FROM
+            tags t
+            JOIN bookmark_tags bt ON t.id = bt.tag_id
+        WHERE
+            bt.bookmark_id = b.id
+    ) AS tags
+FROM
+    bookmarks b
+WHERE
+    title IS NOT NULL
+    AND TRIM(title) != ''
+    AND title IN (
+        SELECT
+            title
+        FROM
+            bookmarks
+        WHERE
+            title IS NOT NULL
+            AND TRIM(title) != ''
+        GROUP BY
+            title
+        HAVING
+            COUNT(*) > 1
+    )
+ORDER BY
+    title ASC,
+    uri ASC
+"#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DBError::CouldntExecuteQuery("fetch duplicate bookmarks".into(), e))?;
+
+    Ok(bookmarks)
 }
 
 #[cfg(test)]

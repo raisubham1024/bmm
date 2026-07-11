@@ -28,7 +28,7 @@ pub async fn check_bookmarks(
     limit: u16,
     concurrency: u16,
     timeout: u16,
-    only_broken: bool,
+    show_all: bool,
 ) -> Result<(), CheckBookmarksError> {
     let bookmarks = get_bookmarks(pool, uri, None, tags, limit)
         .await
@@ -47,7 +47,7 @@ pub async fn check_bookmarks(
 
     let total = bookmarks.len();
     let noun = if total == 1 { "bookmark" } else { "bookmarks" };
-    println!("checking {total} {noun}...\n");
+    println!("checking {total} {noun} ({concurrency} at a time)...\n");
 
     let semaphore = Arc::new(Semaphore::new(concurrency.max(1) as usize));
     let mut handles = Vec::with_capacity(total);
@@ -83,7 +83,7 @@ pub async fn check_bookmarks(
         match status {
             LinkStatus::Ok(code) => {
                 ok_count += 1;
-                if !only_broken {
+                if show_all {
                     println!("[OK]     {code} {uri}");
                 }
             }
@@ -97,11 +97,8 @@ pub async fn check_bookmarks(
 
     println!("\nchecked {total} {noun}: {ok_count} ok, {broken_count} broken");
 
-    if !broken_uris.is_empty() {
-        println!("\nbroken links:");
-        for uri in &broken_uris {
-            println!("  {uri}");
-        }
+    if !show_all && broken_uris.is_empty() {
+        println!("(no broken links found; pass --show-all to see the full results)");
     }
 
     Ok(())

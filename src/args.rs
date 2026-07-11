@@ -203,19 +203,19 @@ pub enum BmmCommand {
             short = 'c',
             long = "concurrency",
             value_name = "INTEGER",
-            default_value_t = 10
+            default_value_t = 25
         )]
         concurrency: u16,
         /// Number of seconds to wait for a response before marking a link as broken
         #[arg(
             long = "timeout",
             value_name = "INTEGER",
-            default_value_t = 10
+            default_value_t = 8
         )]
         timeout: u16,
-        /// Only show broken links in the output (hide working ones)
-        #[arg(short = 'b', long = "only-broken")]
-        only_broken: bool,
+        /// Also show links that are working (by default only broken links are shown)
+        #[arg(short = 'a', long = "show-all")]
+        show_all: bool,
     },
     /// Open bmm's TUI
     Tui,
@@ -448,7 +448,7 @@ skip confirmation: {skip_confirmation}
                 limit,
                 concurrency,
                 timeout,
-                only_broken,
+                show_all,
             } => format!(
                 r#"
 command      : Check bookmarks for broken links
@@ -457,14 +457,14 @@ tags         : {:?}
 limit        : {}
 concurrency  : {}
 timeout (s)  : {}
-only broken  : {}
+show all     : {}
 "#,
                 uri.as_deref().unwrap_or(NOT_PROVIDED),
                 tags,
                 limit,
                 concurrency,
                 timeout,
-                only_broken,
+                show_all,
             ),
             BmmCommand::Tui => r#"
 command      : Open TUI

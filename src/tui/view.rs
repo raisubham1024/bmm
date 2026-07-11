@@ -34,6 +34,8 @@ pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
         }
         ActivePane::TagsList => render_tag_list_view(model, frame, false),
         ActivePane::TagSearchInput => render_tag_list_view(model, frame, true),
+        ActivePane::EditBookmark => render_edit_bookmark_view(model, frame),
+        ActivePane::Confirm => render_confirm_view(model, frame),
     }
 }
 
@@ -143,6 +145,18 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                 ));
             }
         }
+        ActivePane::EditBookmark => {
+            header_components.push(Span::styled(
+                " editing bookmark ",
+                Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+            ));
+        }
+        ActivePane::Confirm => {
+            header_components.push(Span::styled(
+                " confirm ",
+                Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR),
+            ));
+        }
     }
 
     let header_text = Line::from(header_components);
@@ -198,25 +212,41 @@ fn render_status_line(model: &Model, frame: &mut Frame, chunk: Rect) {
 }
 
 fn render_search_input(model: &Model, frame: &mut Frame, chunk: Rect) {
+    // keep 2 for borders and 1 for cursor
+    let width = chunk.width.max(3) - 3;
+    let scroll = model.search_input.visual_scroll(width as usize);
+
     let input = Paragraph::new(model.search_input.value())
         .style(Style::default().fg(COLOR_THREE))
+        .scroll((0, scroll as u16))
         .block(
             Block::bordered()
                 .title(" search query? ")
                 .title_style(Style::new().bold().bg(COLOR_THREE).fg(FG_COLOR)),
         );
     frame.render_widget(input, chunk);
+
+    let cursor_x = model.search_input.visual_cursor().max(scroll) - scroll + 1;
+    frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
 }
 
 fn render_tag_search_input(model: &Model, frame: &mut Frame, chunk: Rect) {
+    // keep 2 for borders and 1 for cursor
+    let width = chunk.width.max(3) - 3;
+    let scroll = model.tag_search_input.visual_scroll(width as usize);
+
     let input = Paragraph::new(model.tag_search_input.value())
         .style(Style::default().fg(TAGS_COLOR))
+        .scroll((0, scroll as u16))
         .block(
             Block::bordered()
                 .title(" search tags? ")
                 .title_style(Style::new().bold().bg(TAGS_COLOR).fg(FG_COLOR)),
         );
     frame.render_widget(input, chunk);
+
+    let cursor_x = model.tag_search_input.visual_cursor().max(scroll) - scroll + 1;
+    frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
 }
 
 fn render_bookmarks_list(model: &mut Model, frame: &mut Frame, chunk: Rect) {
@@ -452,6 +482,142 @@ fn render_tag_list_view(model: &mut Model, frame: &mut Frame, search: bool) {
             render_status_line(model, frame, layout[3]);
         }
     }
+}
+
+fn render_edit_bookmark_view(model: &mut Model, frame: &mut Frame) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(8),
+            Constraint::Length(9),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+    render_bookmarks_list(model, frame, layout[1]);
+    render_edit_bookmark_fields(model, frame, layout[2]);
+    render_status_line(model, frame, layout[3]);
+}
+
+fn render_edit_bookmark_fields(model: &Model, frame: &mut Frame, chunk: Rect) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+        ])
+        .split(chunk);
+
+    render_edit_uri_field(model, frame, layout[0]);
+    render_edit_title_field(model, frame, layout[1]);
+    render_edit_tags_field(model, frame, layout[2]);
+}
+
+fn render_edit_uri_field(model: &Model, frame: &mut Frame, chunk: Rect) {
+    let p = Paragraph::new(model.edit_uri.as_str())
+        .style(Style::default().fg(COLOR_TWO))
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(COLOR_TWO))
+                .title(" URI (read-only) ")
+                .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR)),
+        );
+    frame.render_widget(p, chunk);
+}
+
+fn render_edit_title_field(model: &Model, frame: &mut Frame, chunk: Rect) {
+    let focused = model.edit_focus == EditField::Title;
+    let color = if focused { PRIMARY_COLOR } else { COLOR_TWO };
+
+    // keep 2 for borders and 1 for cursor
+    let width = chunk.width.max(3) - 3;
+    let scroll = model.edit_title_input.visual_scroll(width as usize);
+
+    let title = if focused {
+        " Title (Tab: switch, Ctrl+s: save, Esc: cancel) "
+    } else {
+        " Title "
+    };
+
+    let p = Paragraph::new(model.edit_title_input.value())
+        .style(Style::default().fg(color))
+        .scroll((0, scroll as u16))
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(color))
+                .title(title)
+                .title_style(Style::new().bold().bg(color).fg(FG_COLOR)),
+        );
+    frame.render_widget(p, chunk);
+
+    if focused {
+        let cursor_x = model.edit_title_input.visual_cursor().max(scroll) - scroll + 1;
+        frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
+    }
+}
+
+fn render_edit_tags_field(model: &Model, frame: &mut Frame, chunk: Rect) {
+    let focused = model.edit_focus == EditField::Tags;
+    let color = if focused { PRIMARY_COLOR } else { COLOR_TWO };
+
+    // keep 2 for borders and 1 for cursor
+    let width = chunk.width.max(3) - 3;
+    let scroll = model.edit_tags_input.visual_scroll(width as usize);
+
+    let title = if focused {
+        " Tags, comma separated (Tab: switch, Ctrl+s: save, Esc: cancel) "
+    } else {
+        " Tags, comma separated "
+    };
+
+    let p = Paragraph::new(model.edit_tags_input.value())
+        .style(Style::default().fg(color))
+        .scroll((0, scroll as u16))
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(color))
+                .title(title)
+                .title_style(Style::new().bold().bg(color).fg(FG_COLOR)),
+        );
+    frame.render_widget(p, chunk);
+
+    if focused {
+        let cursor_x = model.edit_tags_input.visual_cursor().max(scroll) - scroll + 1;
+        frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
+    }
+}
+
+fn render_confirm_view(model: &Model, frame: &mut Frame) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(10),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+
+    let message = model.confirm_message();
+    let text = format!("{message}\n\n[y] yes            [n] no");
+
+    let p = Paragraph::new(text)
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(PRIMARY_COLOR))
+                .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR))
+                .title(" are you sure? ")
+                .padding(Padding::new(2, 2, 2, 0)),
+        )
+        .style(Style::new().white().on_black())
+        .alignment(Alignment::Center);
+
+    frame.render_widget(&p, layout[1]);
+    render_status_line(model, frame, layout[2]);
 }
 
 fn render_help_view(model: &mut Model, frame: &mut Frame) {
