@@ -20,6 +20,7 @@ pub(crate) enum ActivePane {
     SearchInput,
     TagSearchInput,
     EditBookmark,
+    Notes,
     Confirm,
     Help,
 }

@@ -4,7 +4,8 @@ use crate::common::DEFAULT_LIMIT;
 use crate::domain::{DraftBookmark, PotentialBookmark};
 use crate::persistence::{
     SaveBookmarkOptions, create_or_update_bookmark, delete_bookmarks_with_uris, get_all_bookmarks,
-    get_bookmarks, get_bookmarks_by_query, get_duplicate_bookmarks, get_tags_with_stats,
+    get_bookmarks, get_bookmarks_by_query, get_duplicate_bookmarks, get_note, get_tags_with_stats,
+    set_note,
 };
 use sqlx::{Pool, Sqlite};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,7 +34,23 @@ pub(super) async fn handle_command(
             tokio::spawn(async move {
                 let mut failures: Vec<String> = Vec::new();
 
-                for url in &urls {
+                // On Android (Termux), firing "termux-open-url" back-to-back
+                // with no gap can cause the underlying Android intent to be
+                // dropped for all but the first url — the OS/Termux:API
+                // hand-off needs a brief moment to actually complete before
+                // the next one is fired. Desktop browsers don't have this
+                // problem, so we leave that path untouched (zero delay).
+                let delay_between_opens = if cfg!(target_os = "android") {
+                    std::time::Duration::from_millis(400)
+                } else {
+                    std::time::Duration::ZERO
+                };
+
+                for (i, url) in urls.iter().enumerate() {
+                    if i > 0 && !delay_between_opens.is_zero() {
+                        tokio::time::sleep(delay_between_opens).await;
+                    }
+
                     if let Err(e) = crate::platform::open_url(url) {
                         failures.push(format!("{url}: {e}"));
                     }
@@ -93,6 +110,22 @@ pub(super) async fn handle_command(
             tokio::spawn(async move {
                 let result = delete_bookmarks_with_uris(&pool, &vec![uri]).await;
                 let _ = event_tx.try_send(Message::BookmarkDeleted(result));
+            });
+        }
+        Command::FetchNote(uri) => {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let result = get_note(&pool, &uri).await;
+                let _ = event_tx.try_send(Message::NoteFetched(uri, result));
+            });
+        }
+        Command::SaveNote { uri, note } => {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let result = set_note(&pool, &uri, note)
+                    .await
+                    .map_err(|e| format!("{e}"));
+                let _ = event_tx.try_send(Message::NoteSaved(result));
             });
         }
         Command::UpdateBookmark { uri, title, tags } => {

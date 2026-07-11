@@ -208,7 +208,7 @@ fn get_new_bookmark_details_from_temp_file(
     )))
 }
 
-fn get_text_editor_exe() -> Result<(String, String), CouldntGetDetailsViaEditorError> {
+pub(super) fn get_text_editor_exe() -> Result<(String, String), CouldntGetDetailsViaEditorError> {
     fn get_env_var(key: &str) -> Result<String, CouldntGetDetailsViaEditorError> {
         match std::env::var(key) {
             Ok(v) => Ok(v),

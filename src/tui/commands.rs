@@ -10,6 +10,11 @@ pub(super) enum Command {
     FetchBookmarksForTag(String),
     FetchDuplicateBookmarks,
     DeleteBookmark(String),
+    FetchNote(String),
+    SaveNote {
+        uri: String,
+        note: Option<String>,
+    },
     UpdateBookmark {
         uri: String,
         title: Option<String>,

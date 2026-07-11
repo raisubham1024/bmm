@@ -216,6 +216,34 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                     Some(UserMessage::error(&format!("couldn't update bookmark: {e}")));
             }
         },
+        Message::StartNoteEdit => {
+            if let Some(uri) = model.get_selected_bookmark_uri() {
+                cmds.push(Command::FetchNote(uri));
+            }
+        }
+        Message::NoteFetched(uri, result) => match result {
+            Ok(note) => model.populate_note(uri, note),
+            Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
+        },
+        Message::NoteInputGotEvent(event) => {
+            model.note_input.handle_event(&event);
+        }
+        Message::RequestSaveNote => {
+            model.request_save_note();
+        }
+        Message::RequestExitNote => {
+            model.request_exit_note();
+        }
+        Message::NoteSaved(result) => match result {
+            Ok(()) => {
+                model.cancel_note_edit();
+                model.user_message = Some(UserMessage::info("note saved!").with_frames_left(1));
+            }
+            Err(e) => {
+                model.user_message =
+                    Some(UserMessage::error(&format!("couldn't save note: {e}")));
+            }
+        },
         Message::ConfirmYes => {
             if let Some(confirmation) = model.pending_confirmation.take() {
                 match confirmation {
@@ -245,6 +273,21 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                     }
                     PendingConfirmation::DiscardEdit => {
                         model.cancel_edit();
+                    }
+                    PendingConfirmation::SaveNote => {
+                        let note = {
+                            let n = model.note_input.value().trim();
+                            if n.is_empty() { None } else { Some(n.to_string()) }
+                        };
+
+                        cmds.push(Command::SaveNote {
+                            uri: model.note_uri.clone(),
+                            note,
+                        });
+                        model.active_pane = ActivePane::Notes;
+                    }
+                    PendingConfirmation::DiscardNote => {
+                        model.cancel_note_edit();
                     }
                     PendingConfirmation::TooManyLinksWarning(_) => {
                         model.active_pane = model.pane_before_confirm;

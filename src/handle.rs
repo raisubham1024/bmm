@@ -173,6 +173,8 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
             show_all,
         } => check_bookmarks(&pool, uri, tags, limit, concurrency, timeout, show_all).await?,
 
+        BmmCommand::Notes { uri, print } => handle_notes_command(&pool, uri, print).await?,
+
         BmmCommand::Tui => run_tui(&pool, TuiContext::Initial).await?,
     }
 

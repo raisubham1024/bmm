@@ -38,6 +38,12 @@ pub enum Message {
     RequestSaveBookmarkEdit,
     RequestExitEdit,
     BookmarkUpdated(Result<(), String>),
+    StartNoteEdit,
+    NoteFetched(String, Result<Option<String>, DBError>),
+    NoteInputGotEvent(Event),
+    RequestSaveNote,
+    RequestExitNote,
+    NoteSaved(Result<(), String>),
     ConfirmYes,
     ConfirmNo,
     ContentCopiedToClipboard(Result<(), String>),
@@ -74,6 +80,7 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         }
                         KeyCode::Char('d') => Some(Message::ShowDuplicates),
                         KeyCode::Char('e') => Some(Message::StartEditBookmark),
+                        KeyCode::Char('n') => Some(Message::StartNoteEdit),
                         KeyCode::Delete => Some(Message::RequestDeleteBookmark),
                         KeyCode::Char('y') => Some(Message::CopyURIToClipboard),
                         KeyCode::Char('Y') => Some(Message::CopyURIsToClipboard),
@@ -120,6 +127,15 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                             Some(Message::RequestSaveBookmarkEdit)
                         }
                         _ => Some(Message::EditFieldGotEvent(event)),
+                    },
+                    ActivePane::Notes => match key_event.code {
+                        KeyCode::Esc => Some(Message::RequestExitNote),
+                        KeyCode::Char('s')
+                            if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            Some(Message::RequestSaveNote)
+                        }
+                        _ => Some(Message::NoteInputGotEvent(event)),
                     },
                     ActivePane::Confirm => match key_event.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => Some(Message::ConfirmYes),

@@ -163,6 +163,8 @@ pub(super) enum PendingConfirmation {
     DeleteBookmark(String),
     SaveEdit,
     DiscardEdit,
+    SaveNote,
+    DiscardNote,
     TooManyLinksWarning(usize),
 }
 
@@ -191,6 +193,9 @@ pub(super) struct Model {
     pub(super) edit_original_title: Option<String>,
     pub(super) edit_original_tags: Option<String>,
     pub(super) viewing_duplicates: bool,
+    pub(super) note_uri: String,
+    pub(super) note_input: Input,
+    pub(super) note_original: Option<String>,
 }
 
 impl Model {
@@ -237,6 +242,9 @@ impl Model {
             edit_original_title: None,
             edit_original_tags: None,
             viewing_duplicates: false,
+            note_uri: String::new(),
+            note_input: Input::default(),
+            note_original: None,
         }
     }
 
@@ -248,6 +256,7 @@ impl Model {
             }
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
+            ActivePane::Notes => {}
             ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
@@ -261,6 +270,7 @@ impl Model {
             }
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
+            ActivePane::Notes => {}
             ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
@@ -274,6 +284,7 @@ impl Model {
             }
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
+            ActivePane::Notes => {}
             ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
@@ -286,6 +297,7 @@ impl Model {
             }
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
+            ActivePane::Notes => {}
             ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
@@ -299,6 +311,7 @@ impl Model {
             ActivePane::TagSearchInput => view,
             ActivePane::SearchInput => view,
             ActivePane::EditBookmark => view,
+            ActivePane::Notes => view,
             ActivePane::Confirm => view,
         };
 
@@ -315,6 +328,7 @@ impl Model {
             ActivePane::TagSearchInput => None,
             ActivePane::SearchInput => None,
             ActivePane::EditBookmark => None,
+            ActivePane::Notes => None,
             ActivePane::Confirm => None,
         }
     }
@@ -337,6 +351,9 @@ impl Model {
             }
             ActivePane::EditBookmark => {
                 self.cancel_edit();
+            }
+            ActivePane::Notes => {
+                self.cancel_note_edit();
             }
             ActivePane::Confirm => {
                 self.cancel_confirm();
@@ -594,12 +611,83 @@ impl Model {
             Some(PendingConfirmation::DiscardEdit) => {
                 "discard unsaved changes to this bookmark?".to_string()
             }
+            Some(PendingConfirmation::SaveNote) => "save this note?".to_string(),
+            Some(PendingConfirmation::DiscardNote) => {
+                "discard unsaved changes to this note?".to_string()
+            }
             Some(PendingConfirmation::TooManyLinksWarning(count)) => {
                 format!(
                     "Total links are {count}, which is more than {MAX_BULK_OPEN_LINKS}.\nOpening this many links at once could cause problems with your browser.\n\nPlease narrow your search/results and try again."
                 )
             }
             None => String::new(),
+        }
+    }
+
+    //-------------------------------//
+    //  notes (hidden, per-bookmark) //
+    //-------------------------------//
+
+    /// Returns the uri under cursor if a bookmark is selected in the List
+    /// pane; used to kick off fetching that bookmark's note.
+    pub(super) fn get_selected_bookmark_uri(&self) -> Option<String> {
+        if self.active_pane != ActivePane::List {
+            return None;
+        }
+
+        self.bookmark_items
+            .state
+            .selected()
+            .and_then(|i| self.bookmark_items.items.get(i))
+            .map(|item| item.bookmark.uri.clone())
+    }
+
+    pub(super) fn populate_note(&mut self, uri: String, note: Option<String>) {
+        self.note_uri = uri;
+        self.note_input = Input::new(note.clone().unwrap_or_default());
+        self.note_original = note;
+        self.active_pane = ActivePane::Notes;
+    }
+
+    pub(super) fn note_has_changes(&self) -> bool {
+        let now = self.note_input.value().trim();
+        let before = self.note_original.as_deref().unwrap_or("").trim();
+        now != before
+    }
+
+    pub(super) fn cancel_note_edit(&mut self) {
+        self.note_input.reset();
+        self.note_uri.clear();
+        self.note_original = None;
+        self.active_pane = ActivePane::List;
+    }
+
+    pub(super) fn request_save_note(&mut self) {
+        if self.active_pane != ActivePane::Notes {
+            return;
+        }
+
+        if !self.note_has_changes() {
+            self.user_message = Some(UserMessage::info("nothing to save").with_frames_left(1));
+            return;
+        }
+
+        self.pending_confirmation = Some(PendingConfirmation::SaveNote);
+        self.pane_before_confirm = ActivePane::Notes;
+        self.active_pane = ActivePane::Confirm;
+    }
+
+    pub(super) fn request_exit_note(&mut self) {
+        if self.active_pane != ActivePane::Notes {
+            return;
+        }
+
+        if self.note_has_changes() {
+            self.pending_confirmation = Some(PendingConfirmation::DiscardNote);
+            self.pane_before_confirm = ActivePane::Notes;
+            self.active_pane = ActivePane::Confirm;
+        } else {
+            self.cancel_note_edit();
         }
     }
 }

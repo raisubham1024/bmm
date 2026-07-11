@@ -217,6 +217,14 @@ pub enum BmmCommand {
         #[arg(short = 'a', long = "show-all")]
         show_all: bool,
     },
+    /// Add, edit, or view a note attached to a bookmark
+    Notes {
+        /// URI of the bookmark to add/edit/view a note for
+        uri: String,
+        /// Print the current note instead of opening a text editor
+        #[arg(short = 'p', long = "print")]
+        print: bool,
+    },
     /// Open bmm's TUI
     Tui,
 }
@@ -465,6 +473,13 @@ show all     : {}
                 concurrency,
                 timeout,
                 show_all,
+            ),
+            BmmCommand::Notes { uri, print } => format!(
+                r#"
+command      : Add/edit/view a note for a bookmark
+uri          : {uri}
+print only   : {print}
+"#,
             ),
             BmmCommand::Tui => r#"
 command      : Open TUI

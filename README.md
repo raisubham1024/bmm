@@ -68,6 +68,7 @@ Commands:
   show      Show bookmark details
   tags      Interact with tags
   check     Check bookmarks for broken/dead links
+  notes     Add, edit, or view a note attached to a bookmark
   tui       Open bmm's TUI
   help      Print this message or the help of the given subcommand(s)
 
@@ -284,6 +285,21 @@ bmm check --show-all
 
 # check more links at the same time, and give up on slow ones sooner
 bmm check --concurrency 20 --timeout 5
+```
+
+### Notes for a bookmark
+
+`bmm` lets you attach a note to any saved bookmark — a couple of words, or
+a full multi-paragraph writeup. Running `bmm notes <uri>` opens the note in
+your text editor (the same one used for `bmm save -e`), pre-filled with
+whatever's already there.
+
+```bash
+# add/edit a note (opens your $EDITOR)
+bmm notes 'https://github.com/dhth/bmm'
+
+# just print the current note, without opening an editor
+bmm notes 'https://github.com/dhth/bmm' --print
 ```
 
 📟 TUI mode
