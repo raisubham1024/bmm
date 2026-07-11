@@ -67,6 +67,7 @@ Commands:
   search    Search bookmarks by matching over terms
   show      Show bookmark details
   tags      Interact with tags
+  check     Check bookmarks for broken/dead links
   tui       Open bmm's TUI
   help      Print this message or the help of the given subcommand(s)
 
@@ -264,6 +265,25 @@ bmm delete 'https://github.com/dhth/bmm' 'https://github.com/dhth/omm'
 
 # skip confirmation
 bmm delete --yes 'https://github.com/dhth/bmm'
+```
+
+### Check bookmarks for broken links
+
+`bmm` can visit your saved bookmarks and report which ones are no longer
+reachable (eg. the site is down, the page was removed, etc.)
+
+```bash
+# check all bookmarks
+bmm check
+
+# only check bookmarks that have a given tag
+bmm check --tags golang
+
+# only show broken links in the output
+bmm check --only-broken
+
+# check more links at the same time, and give up on slow ones sooner
+bmm check --concurrency 20 --timeout 5
 ```
 
 📟 TUI mode

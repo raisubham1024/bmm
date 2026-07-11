@@ -164,6 +164,15 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
                 skip_confirmation,
             } => delete_tags(&pool, tags, skip_confirmation).await?,
         },
+        BmmCommand::Check {
+            uri,
+            tags,
+            limit,
+            concurrency,
+            timeout,
+            only_broken,
+        } => check_bookmarks(&pool, uri, tags, limit, concurrency, timeout, only_broken).await?,
+
         BmmCommand::Tui => run_tui(&pool, TuiContext::Initial).await?,
     }
 

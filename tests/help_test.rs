@@ -38,6 +38,7 @@ fn shows_help() {
       search    Search bookmarks by matching over terms
       show      Show bookmark details
       tags      Interact with tags
+      check     Check bookmarks for broken/dead links
       tui       Open bmm's TUI
       help      Print this message or the help of the given subcommand(s)
 

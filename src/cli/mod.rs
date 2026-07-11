@@ -1,3 +1,4 @@
+mod check;
 mod delete;
 mod display;
 mod import;
@@ -8,6 +9,7 @@ mod search;
 mod show;
 mod tags;
 
+pub use check::*;
 pub use delete::*;
 pub use display::*;
 pub use import::*;

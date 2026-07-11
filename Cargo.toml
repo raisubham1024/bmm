@@ -29,13 +29,14 @@ lazy_static = "1.5.0"
 once_cell = "1.21.4"
 ratatui = "0.30.0"
 regex = "1.12.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 select = "0.6.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sqlx = { version = "0.8.6", default-features = false,  features = ["json", "macros", "migrate", "runtime-tokio", "sqlite"] }
 tempfile = "3.27.0"
 thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tui-input = "0.15.3"
 url = { version= "2.5.8", features = ["serde"] }
 which = "8.0.2"

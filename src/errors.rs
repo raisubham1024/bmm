@@ -1,6 +1,6 @@
 use crate::cli::{
-    CouldntGetDetailsViaEditorError, DeleteBookmarksError, DeleteTagsError, ImportError,
-    ListBookmarksError, ListTagsError, ParsingTempFileContentError, RenameTagError,
+    CheckBookmarksError, CouldntGetDetailsViaEditorError, DeleteBookmarksError, DeleteTagsError,
+    ImportError, ListBookmarksError, ListTagsError, ParsingTempFileContentError, RenameTagError,
     SaveBookmarkError, SaveBookmarksError, SearchBookmarksError, ShowBookmarkError,
 };
 use crate::common::{ENV_VAR_BMM_EDITOR, ENV_VAR_EDITOR, IMPORT_FILE_FORMATS};
@@ -40,6 +40,8 @@ pub enum AppError {
     CouldntShowBookmark(#[from] ShowBookmarkError),
     #[error("couldn't delete bookmarks: {0}")]
     CouldntDeleteBookmarks(#[from] DeleteBookmarksError),
+    #[error("couldn't check bookmarks: {0}")]
+    CouldntCheckBookmarks(#[from] CheckBookmarksError),
 
     // tags related
     #[error("couldn't list tags: {0}")]
@@ -116,6 +118,10 @@ impl AppError {
                 DeleteBookmarksError::CouldntDeleteBookmarksInDB(_) => Some(800),
                 DeleteBookmarksError::CouldntFlushStdout(_) => Some(801),
                 DeleteBookmarksError::CouldntReadUserInput(_) => Some(802),
+            },
+            AppError::CouldntCheckBookmarks(e) => match e {
+                CheckBookmarksError::CouldntGetBookmarksFromDB(_) => Some(1100),
+                CheckBookmarksError::CouldntBuildHttpClient(_) => Some(1101),
             },
             AppError::CouldntRenameTag(e) => match e {
                 RenameTagError::SourceAndTargetSame => None,

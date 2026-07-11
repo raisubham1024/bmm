@@ -177,6 +177,46 @@ pub enum BmmCommand {
         #[command(subcommand)]
         tags_command: TagsCommand,
     },
+    /// Check bookmarks for broken/dead links
+    Check {
+        /// Pattern to match bookmark URIs on (only these will be checked)
+        #[arg(short = 'u', long = "uri", value_name = "URI")]
+        uri: Option<String>,
+        /// Tags to match (exactly); only bookmarks with these tags will be checked
+        #[arg(
+            short = 't',
+            long = "tags",
+            value_name = "STRING,STRING..",
+            value_delimiter = ','
+        )]
+        tags: Vec<String>,
+        /// Number of bookmarks to fetch for checking
+        #[arg(
+            short = 'l',
+            long = "limit",
+            value_name = "INTEGER",
+            default_value_t = 500
+        )]
+        limit: u16,
+        /// Number of links to check at the same time
+        #[arg(
+            short = 'c',
+            long = "concurrency",
+            value_name = "INTEGER",
+            default_value_t = 10
+        )]
+        concurrency: u16,
+        /// Number of seconds to wait for a response before marking a link as broken
+        #[arg(
+            long = "timeout",
+            value_name = "INTEGER",
+            default_value_t = 10
+        )]
+        timeout: u16,
+        /// Only show broken links in the output (hide working ones)
+        #[arg(short = 'b', long = "only-broken")]
+        only_broken: bool,
+    },
     /// Open bmm's TUI
     Tui,
 }
@@ -402,6 +442,30 @@ skip confirmation: {skip_confirmation}
 "#,
                 ),
             },
+            BmmCommand::Check {
+                uri,
+                tags,
+                limit,
+                concurrency,
+                timeout,
+                only_broken,
+            } => format!(
+                r#"
+command      : Check bookmarks for broken links
+URI query    : {}
+tags         : {:?}
+limit        : {}
+concurrency  : {}
+timeout (s)  : {}
+only broken  : {}
+"#,
+                uri.as_deref().unwrap_or(NOT_PROVIDED),
+                tags,
+                limit,
+                concurrency,
+                timeout,
+                only_broken,
+            ),
             BmmCommand::Tui => r#"
 command      : Open TUI
 "#

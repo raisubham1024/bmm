@@ -12,10 +12,14 @@ impl Tag {
         self.0.as_str()
     }
 
+    // kept for future use (e.g. grouping/displaying tags by their top-level
+    // category in the TUI or CLI output)
+    #[allow(dead_code)]
     pub fn top_level_category(&self) -> &str {
         self.0.split('/').next().unwrap_or(&self.0)
     }
 
+    #[allow(dead_code)]
     pub fn is_hierarchical(&self) -> bool {
         self.0.contains('/')
     }
