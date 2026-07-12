@@ -165,7 +165,14 @@ pub(super) enum PendingConfirmation {
     DiscardEdit,
     SaveNote,
     DiscardNote,
+    DeleteNote(String),
     TooManyLinksWarning(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum NoteAction {
+    Edit,
+    Delete,
 }
 
 pub(super) struct Model {
@@ -186,7 +193,9 @@ pub(super) struct Model {
     pub(super) debug: bool,
     pub(super) pending_confirmation: Option<PendingConfirmation>,
     pub(super) pane_before_confirm: ActivePane,
-    pub(super) edit_uri: String,
+    pub(super) edit_uri_input: Input,
+    pub(super) edit_original_uri: String,
+    pub(super) edit_uri_editable: bool,
     pub(super) edit_title_input: Input,
     pub(super) edit_tags_input: Input,
     pub(super) edit_focus: EditField,
@@ -196,6 +205,7 @@ pub(super) struct Model {
     pub(super) note_uri: String,
     pub(super) note_input: Input,
     pub(super) note_original: Option<String>,
+    pub(super) note_action: NoteAction,
 }
 
 impl Model {
@@ -235,7 +245,9 @@ impl Model {
             debug,
             pending_confirmation: None,
             pane_before_confirm: ActivePane::List,
-            edit_uri: String::new(),
+            edit_uri_input: Input::default(),
+            edit_original_uri: String::new(),
+            edit_uri_editable: false,
             edit_title_input: Input::default(),
             edit_tags_input: Input::default(),
             edit_focus: EditField::Title,
@@ -245,6 +257,7 @@ impl Model {
             note_uri: String::new(),
             note_input: Input::default(),
             note_original: None,
+            note_action: NoteAction::Edit,
         }
     }
 
@@ -491,7 +504,7 @@ impl Model {
     //  editing a bookmark            //
     //-------------------------------//
 
-    pub(super) fn start_edit_selected_bookmark(&mut self) {
+    pub(super) fn start_edit_selected_bookmark(&mut self, uri_editable: bool) {
         if self.active_pane != ActivePane::List {
             return;
         }
@@ -508,7 +521,9 @@ impl Model {
             });
 
         if let Some((uri, title, tags)) = details {
-            self.edit_uri = uri;
+            self.edit_uri_input = Input::new(uri.clone());
+            self.edit_original_uri = uri;
+            self.edit_uri_editable = uri_editable;
             self.edit_title_input = Input::new(title.clone().unwrap_or_default());
             self.edit_tags_input = Input::new(tags.clone().unwrap_or_default());
             self.edit_original_title = title;
@@ -520,31 +535,50 @@ impl Model {
 
     pub(super) fn edit_focus_next(&mut self) {
         self.edit_focus = match self.edit_focus {
+            EditField::Uri => EditField::Title,
             EditField::Title => EditField::Tags,
-            EditField::Tags => EditField::Title,
+            EditField::Tags => {
+                if self.edit_uri_editable {
+                    EditField::Uri
+                } else {
+                    EditField::Title
+                }
+            }
         };
     }
 
     pub(super) fn edit_focus_previous(&mut self) {
-        // there are only two fields, so moving to the "previous" one is the
-        // same as moving to the "next" one
-        self.edit_focus_next();
+        self.edit_focus = match self.edit_focus {
+            EditField::Title => {
+                if self.edit_uri_editable {
+                    EditField::Uri
+                } else {
+                    EditField::Tags
+                }
+            }
+            EditField::Tags => EditField::Title,
+            EditField::Uri => EditField::Tags,
+        };
     }
 
     pub(super) fn edit_has_changes(&self) -> bool {
         let title_now = self.edit_title_input.value().trim();
         let tags_now = self.edit_tags_input.value().trim();
+        let uri_now = self.edit_uri_input.value().trim();
 
         let title_before = self.edit_original_title.as_deref().unwrap_or("").trim();
         let tags_before = self.edit_original_tags.as_deref().unwrap_or("").trim();
+        let uri_before = self.edit_original_uri.trim();
 
-        title_now != title_before || tags_now != tags_before
+        title_now != title_before || tags_now != tags_before || uri_now != uri_before
     }
 
     pub(super) fn cancel_edit(&mut self) {
         self.edit_title_input.reset();
         self.edit_tags_input.reset();
-        self.edit_uri.clear();
+        self.edit_uri_input.reset();
+        self.edit_original_uri.clear();
+        self.edit_uri_editable = false;
         self.edit_original_title = None;
         self.edit_original_tags = None;
         self.edit_focus = EditField::Title;
@@ -580,14 +614,22 @@ impl Model {
         }
     }
 
-    pub(super) fn apply_bookmark_edit_locally(&mut self, title: Option<String>, tags: Option<String>) {
-        let target_uri = self.edit_uri.clone();
+    pub(super) fn apply_bookmark_edit_locally(
+        &mut self,
+        new_uri: Option<String>,
+        title: Option<String>,
+        tags: Option<String>,
+    ) {
+        let target_uri = self.edit_original_uri.clone();
         if let Some(item) = self
             .bookmark_items
             .items
             .iter_mut()
             .find(|item| item.bookmark.uri == target_uri)
         {
+            if let Some(new_uri) = new_uri {
+                item.bookmark.uri = new_uri;
+            }
             item.bookmark.title = title;
             item.bookmark.tags = tags;
         }
@@ -607,13 +649,25 @@ impl Model {
             Some(PendingConfirmation::DeleteBookmark(uri)) => {
                 format!("delete this bookmark?\n\n{uri}")
             }
-            Some(PendingConfirmation::SaveEdit) => "save changes to this bookmark?".to_string(),
+            Some(PendingConfirmation::SaveEdit) => {
+                let new_uri = self.edit_uri_input.value().trim();
+                if self.edit_uri_editable && new_uri != self.edit_original_uri.trim() {
+                    format!(
+                        "save changes to this bookmark?\n\nuri will change to:\n{new_uri}"
+                    )
+                } else {
+                    "save changes to this bookmark?".to_string()
+                }
+            }
             Some(PendingConfirmation::DiscardEdit) => {
                 "discard unsaved changes to this bookmark?".to_string()
             }
             Some(PendingConfirmation::SaveNote) => "save this note?".to_string(),
             Some(PendingConfirmation::DiscardNote) => {
                 "discard unsaved changes to this note?".to_string()
+            }
+            Some(PendingConfirmation::DeleteNote(uri)) => {
+                format!("delete the note for this bookmark?\n\n{uri}")
             }
             Some(PendingConfirmation::TooManyLinksWarning(count)) => {
                 format!(
@@ -640,6 +694,29 @@ impl Model {
             .selected()
             .and_then(|i| self.bookmark_items.items.get(i))
             .map(|item| item.bookmark.uri.clone())
+    }
+
+    pub(super) fn request_delete_note_for_selected(&mut self) -> Option<Command> {
+        let uri = self.get_selected_bookmark_uri()?;
+        self.note_action = NoteAction::Delete;
+        Some(Command::FetchNote(uri))
+    }
+
+    pub(super) fn handle_note_fetched(&mut self, uri: String, note: Option<String>) {
+        match self.note_action {
+            NoteAction::Edit => self.populate_note(uri, note),
+            NoteAction::Delete => match note {
+                Some(_) => {
+                    self.pending_confirmation = Some(PendingConfirmation::DeleteNote(uri));
+                    self.pane_before_confirm = ActivePane::List;
+                    self.active_pane = ActivePane::Confirm;
+                }
+                None => {
+                    self.user_message =
+                        Some(UserMessage::info("no note to delete for this bookmark").with_frames_left(1));
+                }
+            },
+        }
     }
 
     pub(super) fn populate_note(&mut self, uri: String, note: Option<String>) {

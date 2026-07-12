@@ -2,6 +2,52 @@ use super::errors::DBError;
 use crate::domain::Tag;
 use sqlx::{Pool, Sqlite};
 
+#[derive(thiserror::Error, Debug)]
+pub enum RenameUriError {
+    #[error("\"{0}\" is not a valid uri: {1}")]
+    InvalidUri(String, url::ParseError),
+    #[error("a bookmark with uri \"{0}\" already exists")]
+    UriAlreadyInUse(String),
+    #[error("no bookmark found with uri \"{0}\"")]
+    BookmarkDoesntExist(String),
+    #[error("couldn't execute query: {0}")]
+    QueryFailed(#[source] sqlx::Error),
+}
+
+/// Changes a bookmark's uri in place (via `UPDATE`, not delete+recreate), so
+/// its tags and note (both linked via the bookmark's internal id, not its
+/// uri) are preserved across the rename.
+pub async fn rename_bookmark_uri(
+    pool: &Pool<Sqlite>,
+    old_uri: &str,
+    new_uri: &str,
+    now: i64,
+) -> Result<(), RenameUriError> {
+    let parsed = url::Url::parse(new_uri)
+        .map_err(|e| RenameUriError::InvalidUri(new_uri.to_string(), e))?;
+
+    let result = sqlx::query("UPDATE bookmarks SET uri = ?, updated_at = ? WHERE uri = ?")
+        .bind(parsed.as_str())
+        .bind(now)
+        .bind(old_uri)
+        .execute(pool)
+        .await;
+
+    match result {
+        Ok(r) => {
+            if r.rows_affected() == 0 {
+                Err(RenameUriError::BookmarkDoesntExist(old_uri.to_string()))
+            } else {
+                Ok(())
+            }
+        }
+        Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => Err(
+            RenameUriError::UriAlreadyInUse(new_uri.to_string()),
+        ),
+        Err(e) => Err(RenameUriError::QueryFailed(e)),
+    }
+}
+
 pub async fn rename_tag_name(
     pool: &Pool<Sqlite>,
     source_tag: String,

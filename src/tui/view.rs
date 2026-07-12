@@ -524,15 +524,47 @@ fn render_edit_bookmark_fields(model: &Model, frame: &mut Frame, chunk: Rect) {
 }
 
 fn render_edit_uri_field(model: &Model, frame: &mut Frame, chunk: Rect) {
-    let p = Paragraph::new(model.edit_uri.as_str())
-        .style(Style::default().fg(COLOR_TWO))
+    if !model.edit_uri_editable {
+        let p = Paragraph::new(model.edit_uri_input.value())
+            .style(Style::default().fg(COLOR_TWO))
+            .block(
+                Block::bordered()
+                    .border_style(Style::default().fg(COLOR_TWO))
+                    .title(" URI (read-only; press Esc then 'E' to edit it) ")
+                    .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR)),
+            );
+        frame.render_widget(p, chunk);
+        return;
+    }
+
+    let focused = model.edit_focus == EditField::Uri;
+    let color = if focused { PRIMARY_COLOR } else { COLOR_TWO };
+
+    // keep 2 for borders and 1 for cursor
+    let width = chunk.width.max(3) - 3;
+    let scroll = model.edit_uri_input.visual_scroll(width as usize);
+
+    let title = if focused {
+        " URI (Tab: switch, Ctrl+s: save, Esc: cancel) "
+    } else {
+        " URI "
+    };
+
+    let p = Paragraph::new(model.edit_uri_input.value())
+        .style(Style::default().fg(color))
+        .scroll((0, scroll as u16))
         .block(
             Block::bordered()
-                .border_style(Style::default().fg(COLOR_TWO))
-                .title(" URI (read-only) ")
-                .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR)),
+                .border_style(Style::default().fg(color))
+                .title(title)
+                .title_style(Style::new().bold().bg(color).fg(FG_COLOR)),
         );
     frame.render_widget(p, chunk);
+
+    if focused {
+        let cursor_x = model.edit_uri_input.visual_cursor().max(scroll) - scroll + 1;
+        frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
+    }
 }
 
 fn render_edit_title_field(model: &Model, frame: &mut Frame, chunk: Rect) {

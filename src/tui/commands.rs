@@ -17,6 +17,7 @@ pub(super) enum Command {
     },
     UpdateBookmark {
         uri: String,
+        new_uri: Option<String>,
         title: Option<String>,
         tags: Vec<String>,
     },

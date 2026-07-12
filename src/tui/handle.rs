@@ -5,7 +5,7 @@ use crate::domain::{DraftBookmark, PotentialBookmark};
 use crate::persistence::{
     SaveBookmarkOptions, create_or_update_bookmark, delete_bookmarks_with_uris, get_all_bookmarks,
     get_bookmarks, get_bookmarks_by_query, get_duplicate_bookmarks, get_note, get_tags_with_stats,
-    set_note,
+    rename_bookmark_uri, set_note,
 };
 use sqlx::{Pool, Sqlite};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -128,19 +128,35 @@ pub(super) async fn handle_command(
                 let _ = event_tx.try_send(Message::NoteSaved(result));
             });
         }
-        Command::UpdateBookmark { uri, title, tags } => {
+        Command::UpdateBookmark {
+            uri,
+            new_uri,
+            title,
+            tags,
+        } => {
             let pool = pool.clone();
             tokio::spawn(async move {
-                let potential_bookmark = PotentialBookmark::from((uri, title, &tags));
-
                 let result: Result<(), String> = async {
-                    let draft_bookmark = DraftBookmark::try_from(potential_bookmark)
-                        .map_err(|e| format!("{e}"))?;
-
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .map_err(|e| format!("system time error: {e}"))?
                         .as_secs() as i64;
+
+                    let effective_uri = match &new_uri {
+                        Some(target) if target != &uri => {
+                            rename_bookmark_uri(&pool, &uri, target, now)
+                                .await
+                                .map_err(|e| format!("{e}"))?;
+                            target.clone()
+                        }
+                        _ => uri,
+                    };
+
+                    let potential_bookmark =
+                        PotentialBookmark::from((effective_uri, title, &tags));
+
+                    let draft_bookmark = DraftBookmark::try_from(potential_bookmark)
+                        .map_err(|e| format!("{e}"))?;
 
                     let options = SaveBookmarkOptions {
                         reset_missing_attributes: true,

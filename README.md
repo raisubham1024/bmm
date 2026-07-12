@@ -323,10 +323,13 @@ page](https://github.com/dhth/bmm/issues).
 ### TUI Reference Manual
 
 ```text
-bmm has three views.
+bmm has six views.
 
 - Bookmarks List View
 - Tags List View
+- Edit Bookmark View
+- Notes View
+- Confirm View
 - Help View
 
 Keymaps
@@ -340,14 +343,41 @@ General
 
 Bookmarks List View
     s                    show search input
-    Enter                submit search query
+    Enter                submit search query (leave empty + Enter to show all bookmarks)
     t                    show Tags List View (when search is not active)
+    d                    show bookmarks that have a duplicate title
+    e                    edit the title/tags of the bookmark under cursor
+    E                    edit the URI (as well as title/tags) of the bookmark
+                         under cursor
+    n                    add/edit a note for the bookmark under cursor (hidden)
+    N                    delete the note for the bookmark under cursor, if it
+                         has one (asks for confirmation)
+    Delete / D           delete the bookmark under cursor (asks for
+                         confirmation)
     o                    open URI in browser
+    O                    open all listed bookmarks in browser (max 30; warns if more)
     y                    copy URI under cursor to system clipboard
     Y                    copy all URIs to system clipboard
 
 Tags List View
+    /                    show tag search input
     Enter                show bookmarks that are tagged with the one under cursor
+
+Edit Bookmark View
+    Tab / Down           move to the next field
+    Shift+Tab / Up       move to the previous field
+    Ctrl+s               save changes (asks for confirmation)
+    Esc                  cancel editing (asks for confirmation if there are
+                         unsaved changes)
+
+Notes View
+    Ctrl+s               save the note (asks for confirmation)
+    Esc                  cancel (asks for confirmation if there are
+                         unsaved changes)
+
+Confirm View
+    y                    confirm
+    n / Esc              cancel
 ```
 
 🔐 Verifying release artifacts

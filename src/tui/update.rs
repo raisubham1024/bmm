@@ -177,10 +177,13 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 )));
             }
         },
-        Message::StartEditBookmark => {
-            model.start_edit_selected_bookmark();
+        Message::StartEditBookmark(uri_editable) => {
+            model.start_edit_selected_bookmark(uri_editable);
         }
         Message::EditFieldGotEvent(event) => match model.edit_focus {
+            EditField::Uri => {
+                model.edit_uri_input.handle_event(&event);
+            }
             EditField::Title => {
                 model.edit_title_input.handle_event(&event);
             }
@@ -206,7 +209,15 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                     let t = model.edit_tags_input.value().trim();
                     if t.is_empty() { None } else { Some(t.to_string()) }
                 };
-                model.apply_bookmark_edit_locally(title, tags);
+                let new_uri = {
+                    let u = model.edit_uri_input.value().trim();
+                    if model.edit_uri_editable && u != model.edit_original_uri.trim() {
+                        Some(u.to_string())
+                    } else {
+                        None
+                    }
+                };
+                model.apply_bookmark_edit_locally(new_uri, title, tags);
                 model.cancel_edit();
                 model.user_message =
                     Some(UserMessage::info("bookmark updated!").with_frames_left(1));
@@ -218,11 +229,17 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         },
         Message::StartNoteEdit => {
             if let Some(uri) = model.get_selected_bookmark_uri() {
+                model.note_action = NoteAction::Edit;
                 cmds.push(Command::FetchNote(uri));
             }
         }
+        Message::RequestDeleteNote => {
+            if let Some(c) = model.request_delete_note_for_selected() {
+                cmds.push(c);
+            }
+        }
         Message::NoteFetched(uri, result) => match result {
-            Ok(note) => model.populate_note(uri, note),
+            Ok(note) => model.handle_note_fetched(uri, note),
             Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
         },
         Message::NoteInputGotEvent(event) => {
@@ -236,8 +253,10 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         }
         Message::NoteSaved(result) => match result {
             Ok(()) => {
+                let was_delete = model.note_action == NoteAction::Delete;
                 model.cancel_note_edit();
-                model.user_message = Some(UserMessage::info("note saved!").with_frames_left(1));
+                let msg = if was_delete { "note deleted!" } else { "note saved!" };
+                model.user_message = Some(UserMessage::info(msg).with_frames_left(1));
             }
             Err(e) => {
                 model.user_message =
@@ -263,9 +282,18 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                             .map(|t| t.trim().to_string())
                             .filter(|t| !t.is_empty())
                             .collect();
+                        let new_uri = {
+                            let u = model.edit_uri_input.value().trim();
+                            if model.edit_uri_editable && u != model.edit_original_uri.trim() {
+                                Some(u.to_string())
+                            } else {
+                                None
+                            }
+                        };
 
                         cmds.push(Command::UpdateBookmark {
-                            uri: model.edit_uri.clone(),
+                            uri: model.edit_original_uri.clone(),
+                            new_uri,
                             title,
                             tags,
                         });
@@ -288,6 +316,11 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                     }
                     PendingConfirmation::DiscardNote => {
                         model.cancel_note_edit();
+                    }
+                    PendingConfirmation::DeleteNote(uri) => {
+                        model.note_action = NoteAction::Delete;
+                        cmds.push(Command::SaveNote { uri, note: None });
+                        model.active_pane = ActivePane::List;
                     }
                     PendingConfirmation::TooManyLinksWarning(_) => {
                         model.active_pane = model.pane_before_confirm;

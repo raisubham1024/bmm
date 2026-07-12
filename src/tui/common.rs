@@ -27,6 +27,7 @@ pub(crate) enum ActivePane {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) enum EditField {
+    Uri,
     Title,
     Tags,
 }

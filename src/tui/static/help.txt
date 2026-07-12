@@ -21,9 +21,14 @@ Bookmarks List View
     Enter                submit search query (leave empty + Enter to show all bookmarks)
     t                    show Tags List View (when search is not active)
     d                    show bookmarks that have a duplicate title
-    e                    edit the bookmark under cursor
+    e                    edit the title/tags of the bookmark under cursor
+    E                    edit the URI (as well as title/tags) of the bookmark
+                         under cursor
     n                    add/edit a note for the bookmark under cursor (hidden)
-    Delete               delete the bookmark under cursor (asks for confirmation)
+    N                    delete the note for the bookmark under cursor, if it
+                         has one (asks for confirmation)
+    Delete / D           delete the bookmark under cursor (asks for
+                         confirmation)
     o                    open URI in browser
     O                    open all listed bookmarks in browser (max 30; warns if more)
     y                    copy URI under cursor to system clipboard
