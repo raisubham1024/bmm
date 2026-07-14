@@ -25,11 +25,12 @@ pub async fn search_bookmarks(
     format: OutputFormat,
     limit: u16,
     tui: bool,
+    db_name: String,
 ) -> Result<(), SearchBookmarksError> {
     let search_terms = SearchTerms::try_from(query_terms)?;
 
     if tui {
-        run_tui(pool, TuiContext::Search(search_terms)).await?;
+        run_tui(pool, TuiContext::Search(search_terms), db_name).await?;
         return Ok(());
     }
 

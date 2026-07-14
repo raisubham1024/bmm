@@ -3,6 +3,8 @@ use super::model::Model;
 use crate::domain::{SavedBookmark, TagStats};
 use crate::persistence::DBError;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use sqlx::{Pool, Sqlite};
+use std::collections::HashSet;
 use std::io::Error as IOError;
 
 pub enum Message {
@@ -13,6 +15,7 @@ pub enum Message {
     GoToLastListItem,
     OpenInBrowser,
     RequestOpenAllInBrowser,
+    StartAddBookmark,
     UrlsOpenedInBrowser(UrlsOpenedResult),
     SearchFinished(Result<Vec<SavedBookmark>, DBError>),
     AllBookmarksFetched(Result<Vec<SavedBookmark>, DBError>),
@@ -29,6 +32,19 @@ pub enum Message {
     BookmarksForTagFetched(Result<Vec<SavedBookmark>, DBError>),
     ShowDuplicates,
     DuplicateBookmarksFetched(Result<Vec<SavedBookmark>, DBError>),
+    ShowStarred,
+    StarredBookmarksFetched(Result<Vec<SavedBookmark>, DBError>),
+    StarredUrisFetched(Result<HashSet<String>, DBError>),
+    RequestToggleStar,
+    StarToggled(String, Result<bool, String>),
+    ShowDatabaseList,
+    RequestSwitchDatabase,
+    StartNewDatabaseName,
+    NewDatabaseNameGotEvent(Event),
+    RequestCreateDatabase,
+    DatabaseSwitched(Result<(Pool<Sqlite>, String), String>),
+    ShowGlobalSearch,
+    GlobalSearchFinished(Vec<(String, String, SavedBookmark)>, Vec<String>),
     RequestDeleteBookmark,
     BookmarkDeleted(Result<u64, DBError>),
     StartEditBookmark(bool),
@@ -76,11 +92,16 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('o') => Some(Message::OpenInBrowser),
                         KeyCode::Char('O') => Some(Message::RequestOpenAllInBrowser),
                         KeyCode::Char('s') => Some(Message::ShowView(ActivePane::SearchInput)),
+                        KeyCode::Char('a') => Some(Message::StartAddBookmark),
                         KeyCode::Char('t') | KeyCode::Tab => {
                             Some(Message::ShowView(ActivePane::TagsList))
                         }
                         KeyCode::Char('d') => Some(Message::ShowDuplicates),
                         KeyCode::Char('D') => Some(Message::RequestDeleteBookmark),
+                        KeyCode::Char('S') => Some(Message::ShowStarred),
+                        KeyCode::Char('*') => Some(Message::RequestToggleStar),
+                        KeyCode::Char('A') => Some(Message::ShowDatabaseList),
+                        KeyCode::Char('z') => Some(Message::ShowGlobalSearch),
                         KeyCode::Char('e') => Some(Message::StartEditBookmark(false)),
                         KeyCode::Char('E') => Some(Message::StartEditBookmark(true)),
                         KeyCode::Char('n') => Some(Message::StartNoteEdit),
@@ -140,6 +161,26 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                             Some(Message::RequestSaveNote)
                         }
                         _ => Some(Message::NoteInputGotEvent(event)),
+                    },
+                    ActivePane::DatabaseList => match key_event.code {
+                        KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
+                        KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
+                        KeyCode::Char('g') => Some(Message::GoToFirstListItem),
+                        KeyCode::Char('G') => Some(Message::GoToLastListItem),
+                        KeyCode::Enter => Some(Message::RequestSwitchDatabase),
+                        KeyCode::Char('C') => Some(Message::StartNewDatabaseName),
+                        KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
+                        _ => None,
+                    },
+                    ActivePane::NewDatabaseName => match key_event.code {
+                        KeyCode::Esc => Some(Message::GoBackOrQuit),
+                        KeyCode::Enter => Some(Message::RequestCreateDatabase),
+                        KeyCode::Char('s')
+                            if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            Some(Message::RequestCreateDatabase)
+                        }
+                        _ => Some(Message::NewDatabaseNameGotEvent(event)),
                     },
                     ActivePane::Confirm => match key_event.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => Some(Message::ConfirmYes),

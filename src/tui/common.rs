@@ -21,6 +21,8 @@ pub(crate) enum ActivePane {
     TagSearchInput,
     EditBookmark,
     Notes,
+    DatabaseList,
+    NewDatabaseName,
     Confirm,
     Help,
 }

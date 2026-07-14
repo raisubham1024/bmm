@@ -2,7 +2,7 @@ use crate::args::{Args, BmmCommand, TagsCommand};
 use crate::cli::*;
 use crate::domain::PotentialBookmark;
 use crate::errors::AppError;
-use crate::persistence::get_db_pool;
+use crate::persistence::{get_db_pool, set_starred};
 use crate::tui::{TuiContext, run_tui};
 use crate::utils::get_data_dir;
 use std::fs;
@@ -46,6 +46,12 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
     };
 
     let db_path = db_path.to_str().ok_or(AppError::DBPathNotValidStr)?;
+
+    let db_name = std::path::Path::new(db_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(DATA_FILE)
+        .to_string();
 
     if args.debug {
         display_debug_info(&args, db_path);
@@ -94,7 +100,7 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
             format,
             limit,
             tui,
-        } => search_bookmarks(&pool, &query_terms, format, limit, tui).await?,
+        } => search_bookmarks(&pool, &query_terms, format, limit, tui, db_name.clone()).await?,
 
         BmmCommand::Save {
             uri,
@@ -105,9 +111,11 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
             fail_if_uri_already_saved,
             reset_missing,
             ignore_attribute_errors,
+            star,
         } => {
             let tags = apply_parent_tag(tags, ptag.as_deref());
-            let potential_bookmark = PotentialBookmark::from((uri, title, &tags));
+            let uri = crate::domain::normalize_uri_scheme(uri);
+            let potential_bookmark = PotentialBookmark::from((uri.clone(), title, &tags));
 
             save_bookmark(
                 &pool,
@@ -117,7 +125,11 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
                 reset_missing,
                 ignore_attribute_errors,
             )
-            .await?
+            .await?;
+
+            if star {
+                set_starred(&pool, &uri, true).await?;
+            }
         }
 
         BmmCommand::SaveAll {
@@ -154,7 +166,7 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
                 format,
                 show_stats,
                 tui,
-            } => list_tags(&pool, format, show_stats, tui).await?,
+            } => list_tags(&pool, format, show_stats, tui, db_name.clone()).await?,
             TagsCommand::Rename {
                 source_tag,
                 target_tag,
@@ -175,7 +187,7 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
 
         BmmCommand::Notes { uri, print } => handle_notes_command(&pool, uri, print).await?,
 
-        BmmCommand::Tui => run_tui(&pool, TuiContext::Initial).await?,
+        BmmCommand::Tui => run_tui(&pool, TuiContext::Initial, db_name.clone()).await?,
     }
 
     Ok(())

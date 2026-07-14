@@ -152,6 +152,19 @@ impl std::fmt::Display for DraftBookmarkErrors {
     }
 }
 
+/// If `uri` has no scheme (eg. "example.com" instead of
+/// "https://example.com" or "http://example.com"), prepends "https://" to
+/// it, so people don't have to type the scheme out by hand every time they
+/// save a bookmark. If a scheme is already present, `uri` is returned
+/// unchanged.
+pub fn normalize_uri_scheme(uri: String) -> String {
+    if uri.contains("://") {
+        uri
+    } else {
+        format!("https://{uri}")
+    }
+}
+
 impl TryFrom<(PotentialBookmark, bool)> for DraftBookmark {
     type Error = DraftBookmarkError;
 
@@ -160,8 +173,10 @@ impl TryFrom<(PotentialBookmark, bool)> for DraftBookmark {
         static WHITESPACE_RE: Lazy<Regex> =
             Lazy::new(|| Regex::new(r"\s+").expect("regex is invalid"));
 
-        let (potential_bookmark, ignore_attribute_errors) = value;
+        let (mut potential_bookmark, ignore_attribute_errors) = value;
         let tags = &potential_bookmark.tags;
+
+        potential_bookmark.uri = normalize_uri_scheme(potential_bookmark.uri);
 
         Url::parse(&potential_bookmark.uri).map_err(DraftBookmarkError::CouldntParseUri)?;
 

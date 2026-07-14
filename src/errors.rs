@@ -5,7 +5,7 @@ use crate::cli::{
     SearchBookmarksError, ShowBookmarkError,
 };
 use crate::common::{ENV_VAR_BMM_EDITOR, ENV_VAR_EDITOR, IMPORT_FILE_FORMATS};
-use crate::persistence::DBError;
+use crate::persistence::{DBError, StarError};
 use crate::tui::AppTuiError;
 use crate::utils::DataDirError;
 use std::io::Error as IOError;
@@ -45,6 +45,8 @@ pub enum AppError {
     CouldntCheckBookmarks(#[from] CheckBookmarksError),
     #[error("couldn't handle notes command: {0}")]
     CouldntHandleNotesCommand(#[from] NotesCommandError),
+    #[error("couldn't set starred status: {0}")]
+    CouldntSetStarred(#[from] StarError),
 
     // tags related
     #[error("couldn't list tags: {0}")]
@@ -130,6 +132,10 @@ impl AppError {
                 NotesCommandError::CouldntGetNote(_) => Some(1200),
                 NotesCommandError::CouldntUseTextEditor(_) => Some(1201),
                 NotesCommandError::CouldntSaveNote(_) => Some(1202),
+            },
+            AppError::CouldntSetStarred(e) => match e {
+                StarError::CouldntExecuteQuery(_) => Some(1300),
+                StarError::CouldntDetermineTime(_) => Some(1301),
             },
             AppError::CouldntRenameTag(e) => match e {
                 RenameTagError::SourceAndTargetSame => None,

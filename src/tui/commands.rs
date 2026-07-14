@@ -9,7 +9,15 @@ pub(super) enum Command {
     FetchTags,
     FetchBookmarksForTag(String),
     FetchDuplicateBookmarks,
-    DeleteBookmark(String),
+    FetchStarredBookmarks,
+    FetchStarredUris,
+    ToggleStar(String),
+    SwitchDatabase {
+        path: String,
+        display_name: String,
+    },
+    GlobalSearch(Option<SearchTerms>),
+    DeleteBookmark(String, Option<String>),
     FetchNote(String),
     SaveNote {
         uri: String,
@@ -20,6 +28,8 @@ pub(super) enum Command {
         new_uri: Option<String>,
         title: Option<String>,
         tags: Vec<String>,
+        is_new: bool,
+        target_db_path: Option<String>,
     },
     CopyContentToClipboard(String),
 }

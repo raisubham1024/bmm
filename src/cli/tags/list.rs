@@ -21,9 +21,10 @@ pub async fn list_tags(
     format: OutputFormat,
     show_stats: bool,
     tui: bool,
+    db_name: String,
 ) -> Result<(), ListTagsError> {
     if tui {
-        run_tui(pool, TuiContext::Tags).await?;
+        run_tui(pool, TuiContext::Tags, db_name).await?;
         return Ok(());
     }
 

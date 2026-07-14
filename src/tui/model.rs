@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{ListItem, ListState},
 };
 use sqlx::{Pool, Sqlite};
+use std::collections::HashSet;
 use tui_input::Input;
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -22,6 +23,8 @@ pub(crate) enum RunningState {
 pub(crate) struct BookmarkItem {
     pub(crate) bookmark: SavedBookmark,
     pub(crate) status: bool,
+    pub(crate) starred: bool,
+    pub(crate) source_db: Option<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -77,7 +80,7 @@ pub enum TuiContext {
 }
 
 impl BookmarkItems {
-    fn default() -> Self {
+    pub(super) fn default() -> Self {
         let state = ListState::default().with_selected(None);
 
         Self {
@@ -88,7 +91,7 @@ impl BookmarkItems {
 }
 
 impl TagItems {
-    fn default() -> Self {
+    pub(super) fn default() -> Self {
         let state = ListState::default().with_selected(None);
 
         Self {
@@ -104,6 +107,14 @@ impl From<Vec<SavedBookmark>> for BookmarkItems {
             .into_iter()
             .map(|bookmark| BookmarkItem::new(bookmark, false))
             .collect();
+        let state = ListState::default().with_selected(Some(0));
+
+        Self { items, state }
+    }
+}
+
+impl From<Vec<BookmarkItem>> for BookmarkItems {
+    fn from(items: Vec<BookmarkItem>) -> Self {
         let state = ListState::default().with_selected(Some(0));
 
         Self { items, state }
@@ -134,16 +145,38 @@ impl From<Vec<TagStats>> for TagItems {
 
 impl BookmarkItem {
     fn new(bookmark: SavedBookmark, status: bool) -> Self {
-        Self { bookmark, status }
+        Self {
+            bookmark,
+            status,
+            starred: false,
+            source_db: None,
+        }
+    }
+
+    pub(super) fn with_source_db(bookmark: SavedBookmark, name: String, path: String) -> Self {
+        Self {
+            bookmark,
+            status: false,
+            starred: false,
+            source_db: Some((name, path)),
+        }
     }
 }
 
 impl From<&BookmarkItem> for ListItem<'_> {
     fn from(value: &BookmarkItem) -> Self {
+        let star_prefix = if value.starred { "\u{2605} " } else { "" };
+        let db_suffix = match &value.source_db {
+            Some((name, _)) => format!("  [{name}]"),
+            None => String::new(),
+        };
         let line = match value.status {
-            false => Line::from(value.bookmark.uri.clone()),
+            false => Line::from(format!(
+                "{star_prefix}{}{db_suffix}",
+                value.bookmark.uri
+            )),
             true => Line::styled(
-                format!("> {}", value.bookmark.uri.clone()),
+                format!("> {star_prefix}{}{db_suffix}", value.bookmark.uri),
                 Style::new().fg(COLOR_TWO),
             ),
         };
@@ -160,7 +193,7 @@ impl From<&TagStats> for ListItem<'_> {
 
 #[derive(Debug, Clone)]
 pub(super) enum PendingConfirmation {
-    DeleteBookmark(String),
+    DeleteBookmark(String, Option<String>),
     SaveEdit,
     DiscardEdit,
     SaveNote,
@@ -196,6 +229,8 @@ pub(super) struct Model {
     pub(super) edit_uri_input: Input,
     pub(super) edit_original_uri: String,
     pub(super) edit_uri_editable: bool,
+    pub(super) edit_is_new: bool,
+    pub(super) edit_target_db_path: Option<String>,
     pub(super) edit_title_input: Input,
     pub(super) edit_tags_input: Input,
     pub(super) edit_focus: EditField,
@@ -206,6 +241,13 @@ pub(super) struct Model {
     pub(super) note_input: Input,
     pub(super) note_original: Option<String>,
     pub(super) note_action: NoteAction,
+    pub(super) starred_uris: HashSet<String>,
+    pub(super) showing_starred: bool,
+    pub(super) active_db_name: String,
+    pub(super) available_dbs: Vec<String>,
+    pub(super) db_list_state: ListState,
+    pub(super) new_db_name_input: Input,
+    pub(super) global_search_mode: bool,
 }
 
 impl Model {
@@ -213,6 +255,7 @@ impl Model {
         pool: &Pool<Sqlite>,
         context: TuiContext,
         terminal_dimensions: TerminalDimensions,
+        db_name: String,
     ) -> Self {
         let debug = std::env::var("BMM_DEBUG").unwrap_or_default().trim() == "1";
 
@@ -248,6 +291,8 @@ impl Model {
             edit_uri_input: Input::default(),
             edit_original_uri: String::new(),
             edit_uri_editable: false,
+            edit_is_new: false,
+            edit_target_db_path: None,
             edit_title_input: Input::default(),
             edit_tags_input: Input::default(),
             edit_focus: EditField::Title,
@@ -258,6 +303,13 @@ impl Model {
             note_input: Input::default(),
             note_original: None,
             note_action: NoteAction::Edit,
+            starred_uris: HashSet::new(),
+            showing_starred: false,
+            active_db_name: db_name,
+            available_dbs: vec![],
+            db_list_state: ListState::default(),
+            new_db_name_input: Input::default(),
+            global_search_mode: false,
         }
     }
 
@@ -267,9 +319,11 @@ impl Model {
             ActivePane::TagsList | ActivePane::TagSearchInput => {
                 self.tag_items.state.select_next()
             }
+            ActivePane::DatabaseList => self.db_list_state.select_next(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
+            ActivePane::NewDatabaseName => {}
             ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
@@ -281,9 +335,11 @@ impl Model {
             ActivePane::TagsList | ActivePane::TagSearchInput => {
                 self.tag_items.state.select_previous()
             }
+            ActivePane::DatabaseList => self.db_list_state.select_previous(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
+            ActivePane::NewDatabaseName => {}
             ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
@@ -295,9 +351,11 @@ impl Model {
             ActivePane::TagsList | ActivePane::TagSearchInput => {
                 self.tag_items.state.select_first()
             }
+            ActivePane::DatabaseList => self.db_list_state.select_first(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
+            ActivePane::NewDatabaseName => {}
             ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
@@ -308,9 +366,11 @@ impl Model {
             ActivePane::TagsList | ActivePane::TagSearchInput => {
                 self.tag_items.state.select_last()
             }
+            ActivePane::DatabaseList => self.db_list_state.select_last(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
+            ActivePane::NewDatabaseName => {}
             ActivePane::Confirm => {}
             ActivePane::Help => {}
         }
@@ -325,6 +385,8 @@ impl Model {
             ActivePane::SearchInput => view,
             ActivePane::EditBookmark => view,
             ActivePane::Notes => view,
+            ActivePane::DatabaseList => view,
+            ActivePane::NewDatabaseName => view,
             ActivePane::Confirm => view,
         };
 
@@ -342,6 +404,8 @@ impl Model {
             ActivePane::SearchInput => None,
             ActivePane::EditBookmark => None,
             ActivePane::Notes => None,
+            ActivePane::DatabaseList => None,
+            ActivePane::NewDatabaseName => None,
             ActivePane::Confirm => None,
         }
     }
@@ -357,6 +421,7 @@ impl Model {
             ActivePane::Help => self.active_pane = ActivePane::List,
             ActivePane::SearchInput => {
                 self.search_input.reset();
+                self.initial = false;
                 self.active_pane = ActivePane::List;
             }
             ActivePane::TagSearchInput => {
@@ -368,15 +433,18 @@ impl Model {
             ActivePane::Notes => {
                 self.cancel_note_edit();
             }
+            ActivePane::DatabaseList => {
+                self.active_pane = ActivePane::List;
+            }
+            ActivePane::NewDatabaseName => {
+                self.new_db_name_input.reset();
+                self.active_pane = ActivePane::List;
+            }
             ActivePane::Confirm => {
                 self.cancel_confirm();
             }
             ActivePane::TagsList => {
-                if self.bookmark_items.items.is_empty() {
-                    self.running_state = RunningState::Done;
-                } else {
-                    self.active_pane = ActivePane::List;
-                }
+                self.active_pane = ActivePane::List;
             }
         };
     }
@@ -400,7 +468,7 @@ impl Model {
     pub(super) fn cancel_tag_search(&mut self) {
         self.tag_search_input.reset();
         self.tag_items = TagItems::from(self.all_tag_items.clone());
-        self.active_pane = ActivePane::TagsList;
+        self.active_pane = ActivePane::List;
     }
 
     pub(super) fn confirm_tag_search(&mut self) {
@@ -474,7 +542,9 @@ impl Model {
             .map(|item| item.bookmark.uri.clone());
 
         if let Some(uri) = uri {
-            self.pending_confirmation = Some(PendingConfirmation::DeleteBookmark(uri));
+            let target_db_path = self.get_selected_source_db_path();
+            self.pending_confirmation =
+                Some(PendingConfirmation::DeleteBookmark(uri, target_db_path));
             self.pane_before_confirm = ActivePane::List;
             self.active_pane = ActivePane::Confirm;
         }
@@ -504,26 +574,47 @@ impl Model {
     //  editing a bookmark            //
     //-------------------------------//
 
+    pub(super) fn start_add_new_bookmark(&mut self) {
+        if self.active_pane != ActivePane::List {
+            return;
+        }
+
+        self.edit_uri_input = Input::default();
+        self.edit_original_uri = String::new();
+        self.edit_uri_editable = true;
+        self.edit_is_new = true;
+        self.edit_target_db_path = None;
+        self.edit_title_input = Input::default();
+        self.edit_tags_input = Input::default();
+        self.edit_original_title = None;
+        self.edit_original_tags = None;
+        self.edit_focus = EditField::Uri;
+        self.active_pane = ActivePane::EditBookmark;
+    }
+
     pub(super) fn start_edit_selected_bookmark(&mut self, uri_editable: bool) {
         if self.active_pane != ActivePane::List {
             return;
         }
 
-        let details: Option<(String, Option<String>, Option<String>)> =
+        let details: Option<(String, Option<String>, Option<String>, Option<String>)> =
             self.bookmark_items.state.selected().and_then(|i| {
                 self.bookmark_items.items.get(i).map(|item| {
                     (
                         item.bookmark.uri.clone(),
                         item.bookmark.title.clone(),
                         item.bookmark.tags.clone(),
+                        item.source_db.as_ref().map(|(_, path)| path.clone()),
                     )
                 })
             });
 
-        if let Some((uri, title, tags)) = details {
+        if let Some((uri, title, tags, target_db_path)) = details {
             self.edit_uri_input = Input::new(uri.clone());
             self.edit_original_uri = uri;
             self.edit_uri_editable = uri_editable;
+            self.edit_is_new = false;
+            self.edit_target_db_path = target_db_path;
             self.edit_title_input = Input::new(title.clone().unwrap_or_default());
             self.edit_tags_input = Input::new(tags.clone().unwrap_or_default());
             self.edit_original_title = title;
@@ -562,6 +653,10 @@ impl Model {
     }
 
     pub(super) fn edit_has_changes(&self) -> bool {
+        if self.edit_is_new {
+            return !self.edit_uri_input.value().trim().is_empty();
+        }
+
         let title_now = self.edit_title_input.value().trim();
         let tags_now = self.edit_tags_input.value().trim();
         let uri_now = self.edit_uri_input.value().trim();
@@ -579,6 +674,8 @@ impl Model {
         self.edit_uri_input.reset();
         self.edit_original_uri.clear();
         self.edit_uri_editable = false;
+        self.edit_is_new = false;
+        self.edit_target_db_path = None;
         self.edit_original_title = None;
         self.edit_original_tags = None;
         self.edit_focus = EditField::Title;
@@ -587,6 +684,11 @@ impl Model {
 
     pub(super) fn request_save_edit(&mut self) {
         if self.active_pane != ActivePane::EditBookmark {
+            return;
+        }
+
+        if self.edit_is_new && self.edit_uri_input.value().trim().is_empty() {
+            self.user_message = Some(UserMessage::error("uri can't be empty"));
             return;
         }
 
@@ -620,6 +722,17 @@ impl Model {
         title: Option<String>,
         tags: Option<String>,
     ) {
+        if self.edit_is_new {
+            let uri = new_uri.unwrap_or_else(|| self.edit_uri_input.value().trim().to_string());
+            let bookmark = SavedBookmark { uri, title, tags };
+            self.bookmark_items
+                .items
+                .insert(0, BookmarkItem::new(bookmark, false));
+            self.bookmark_items.state.select(Some(0));
+            self.sync_starred_markers();
+            return;
+        }
+
         let target_uri = self.edit_original_uri.clone();
         if let Some(item) = self
             .bookmark_items
@@ -644,19 +757,176 @@ impl Model {
         self.active_pane = self.pane_before_confirm;
     }
 
+    //-------------------------------//
+    //  starred bookmarks             //
+    //-------------------------------//
+
+    /// Refreshes each visible item's star marker based on `starred_uris`.
+    /// Call this any time `bookmark_items` is (re)populated, or
+    /// `starred_uris` changes.
+    pub(super) fn sync_starred_markers(&mut self) {
+        for item in self.bookmark_items.items.iter_mut() {
+            item.starred = self.starred_uris.contains(&item.bookmark.uri);
+        }
+    }
+
+    pub(super) fn request_toggle_star(&mut self) -> Option<Command> {
+        let uri = self.get_selected_bookmark_uri()?;
+        Some(Command::ToggleStar(uri))
+    }
+
+    pub(super) fn apply_star_toggle(&mut self, uri: &str, starred: bool) {
+        if starred {
+            self.starred_uris.insert(uri.to_string());
+        } else {
+            self.starred_uris.remove(uri);
+
+            // if we're currently only showing starred bookmarks, an item
+            // that just got unstarred should disappear from view
+            if self.showing_starred {
+                self.remove_bookmark_by_uri(uri);
+            }
+        }
+
+        self.sync_starred_markers();
+    }
+
+    //-------------------------------//
+    //  multiple databases            //
+    //-------------------------------//
+
+    /// Scans `~/.local/share/bmm/` (bmm's default data directory) for
+    /// `.db` files, and populates `available_dbs` with their filenames.
+    /// This is a synchronous, local directory listing, so it's done
+    /// directly rather than via an async Command.
+    pub(super) fn scan_available_databases(&mut self) {
+        let mut dbs: Vec<String> = Vec::new();
+
+        if let Ok(data_dir) = crate::utils::get_data_dir() {
+            let bmm_dir = data_dir.join("bmm");
+
+            if let Ok(entries) = std::fs::read_dir(&bmm_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("db")
+                        && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    {
+                        dbs.push(name.to_string());
+                    }
+                }
+            }
+        }
+
+        if !dbs.iter().any(|d| d == &self.active_db_name) {
+            dbs.push(self.active_db_name.clone());
+        }
+
+        dbs.sort();
+        self.available_dbs = dbs;
+    }
+
+    pub(super) fn show_database_list(&mut self) {
+        self.scan_available_databases();
+
+        let selected_index = self
+            .available_dbs
+            .iter()
+            .position(|d| d == &self.active_db_name)
+            .unwrap_or(0);
+
+        self.db_list_state.select(Some(selected_index));
+        self.active_pane = ActivePane::DatabaseList;
+    }
+
+    pub(super) fn request_switch_to_selected_database(&mut self) -> Option<Command> {
+        let name = self
+            .db_list_state
+            .selected()
+            .and_then(|i| self.available_dbs.get(i))?
+            .clone();
+
+        if name == self.active_db_name {
+            self.user_message =
+                Some(UserMessage::info("already using this database").with_frames_left(1));
+            return None;
+        }
+
+        let data_dir = crate::utils::get_data_dir().ok()?;
+        let path = data_dir.join("bmm").join(&name);
+        let path = path.to_str()?.to_string();
+
+        Some(Command::SwitchDatabase {
+            path,
+            display_name: name,
+        })
+    }
+
+    pub(super) fn start_new_database_name(&mut self) {
+        self.new_db_name_input.reset();
+        self.active_pane = ActivePane::NewDatabaseName;
+    }
+
+    pub(super) fn request_create_database(&mut self) -> Option<Command> {
+        let raw = self.new_db_name_input.value().trim();
+        if raw.is_empty() {
+            self.user_message = Some(UserMessage::error("database name can't be empty"));
+            return None;
+        }
+
+        let name = if raw.ends_with(".db") {
+            raw.to_string()
+        } else {
+            format!("{raw}.db")
+        };
+
+        let data_dir = crate::utils::get_data_dir().ok()?;
+        let path = data_dir.join("bmm").join(&name);
+        let path_str = path.to_str()?.to_string();
+
+        if path.exists() {
+            self.user_message = Some(UserMessage::error("a database with this name already exists"));
+            return None;
+        }
+
+        self.new_db_name_input.reset();
+
+        Some(Command::SwitchDatabase {
+            path: path_str,
+            display_name: name,
+        })
+    }
+
+    pub(super) fn apply_database_switch(&mut self, display_name: String) {
+        self.active_db_name = display_name;
+        self.active_pane = ActivePane::List;
+        self.bookmark_items = BookmarkItems::default();
+        self.tag_items = TagItems::default();
+        self.all_tag_items = vec![];
+        self.starred_uris = HashSet::new();
+        self.showing_starred = false;
+        self.viewing_duplicates = false;
+    }
+
     pub(super) fn confirm_message(&self) -> String {
         match &self.pending_confirmation {
-            Some(PendingConfirmation::DeleteBookmark(uri)) => {
-                format!("delete this bookmark?\n\n{uri}")
-            }
+            Some(PendingConfirmation::DeleteBookmark(uri, target_db_path)) => match target_db_path
+            {
+                Some(_) => format!("delete this bookmark (from another database)?\n\n{uri}"),
+                None => format!("delete this bookmark?\n\n{uri}"),
+            },
             Some(PendingConfirmation::SaveEdit) => {
-                let new_uri = self.edit_uri_input.value().trim();
-                if self.edit_uri_editable && new_uri != self.edit_original_uri.trim() {
-                    format!(
-                        "save changes to this bookmark?\n\nuri will change to:\n{new_uri}"
-                    )
+                if self.edit_is_new {
+                    let uri = self.edit_uri_input.value().trim();
+                    format!("save this new bookmark?\n\n{uri}")
                 } else {
-                    "save changes to this bookmark?".to_string()
+                    let new_uri = self.edit_uri_input.value().trim();
+                    if self.edit_uri_editable && new_uri != self.edit_original_uri.trim() {
+                        format!(
+                            "save changes to this bookmark?\n\nuri will change to:\n{new_uri}"
+                        )
+                    } else {
+                        "save changes to this bookmark?".to_string()
+                    }
                 }
             }
             Some(PendingConfirmation::DiscardEdit) => {
@@ -694,6 +964,22 @@ impl Model {
             .selected()
             .and_then(|i| self.bookmark_items.items.get(i))
             .map(|item| item.bookmark.uri.clone())
+    }
+
+    /// Returns the full path of the selected item's source database, if
+    /// it's a cross-database search result (ie. not from the currently
+    /// active database).
+    pub(super) fn get_selected_source_db_path(&self) -> Option<String> {
+        if self.active_pane != ActivePane::List {
+            return None;
+        }
+
+        self.bookmark_items
+            .state
+            .selected()
+            .and_then(|i| self.bookmark_items.items.get(i))
+            .and_then(|item| item.source_db.as_ref())
+            .map(|(_, path)| path.clone())
     }
 
     pub(super) fn request_delete_note_for_selected(&mut self) -> Option<Command> {

@@ -34,8 +34,12 @@ pub enum AppTuiError {
     ReadEvent(IOError),
 }
 
-pub async fn run_tui(pool: &Pool<Sqlite>, context: TuiContext) -> Result<(), AppTuiError> {
-    let mut tui = AppTui::new(pool, context)?;
+pub async fn run_tui(
+    pool: &Pool<Sqlite>,
+    context: TuiContext,
+    db_name: String,
+) -> Result<(), AppTuiError> {
+    let mut tui = AppTui::new(pool, context, db_name)?;
     tui.run().await?;
 
     Ok(())
@@ -64,7 +68,11 @@ struct AppTui {
 }
 
 impl AppTui {
-    pub fn new(pool: &Pool<Sqlite>, context: TuiContext) -> Result<Self, AppTuiError> {
+    pub fn new(
+        pool: &Pool<Sqlite>,
+        context: TuiContext,
+        db_name: String,
+    ) -> Result<Self, AppTuiError> {
         let terminal = ratatui::try_init().map_err(AppTuiError::InitializeTerminal)?;
         let (event_tx, event_rx) = mpsc::channel(10);
         let mut initial_commands = Vec::new();
@@ -83,8 +91,9 @@ impl AppTui {
                 initial_commands.push(Command::FetchTags);
             }
         }
+        initial_commands.push(Command::FetchStarredUris);
 
-        let model = Model::default(pool, context, terminal_dimensions);
+        let model = Model::default(pool, context, terminal_dimensions, db_name);
 
         Ok(Self {
             terminal,

@@ -36,6 +36,8 @@ pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
         ActivePane::TagSearchInput => render_tag_list_view(model, frame, true),
         ActivePane::EditBookmark => render_edit_bookmark_view(model, frame),
         ActivePane::Notes => render_notes_view(model, frame),
+        ActivePane::DatabaseList => render_database_list_view(model, frame),
+        ActivePane::NewDatabaseName => render_new_database_name_view(model, frame),
         ActivePane::Confirm => render_confirm_view(model, frame),
     }
 }
@@ -147,14 +149,31 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
             }
         }
         ActivePane::EditBookmark => {
+            let text = if model.edit_is_new {
+                " adding new bookmark "
+            } else {
+                " editing bookmark "
+            };
             header_components.push(Span::styled(
-                " editing bookmark ",
+                text,
                 Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
             ));
         }
         ActivePane::Notes => {
             header_components.push(Span::styled(
                 " note (hidden) ",
+                Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+            ));
+        }
+        ActivePane::DatabaseList => {
+            header_components.push(Span::styled(
+                " databases ",
+                Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+            ));
+        }
+        ActivePane::NewDatabaseName => {
+            header_components.push(Span::styled(
+                " new database ",
                 Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
             ));
         }
@@ -175,10 +194,13 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
 }
 
 fn render_status_line(model: &Model, frame: &mut Frame, chunk: Rect) {
-    let mut status_bar_lines = vec![Span::styled(
-        TITLE,
-        Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR),
-    )];
+    let mut status_bar_lines = vec![
+        Span::styled(TITLE, Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
+        Span::styled(
+            format!(" [{}] ", model.active_db_name),
+            Style::new().fg(COLOR_TWO),
+        ),
+    ];
 
     if model.debug {
         status_bar_lines.push(Span::from(format!(
@@ -669,6 +691,88 @@ fn render_note_field(model: &Model, frame: &mut Frame, chunk: Rect) {
 
     let cursor_x = model.note_input.visual_cursor().max(scroll) - scroll + 1;
     frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
+}
+
+fn render_database_list_view(model: &mut Model, frame: &mut Frame) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(10),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+
+    let items: Vec<ListItem> = model
+        .available_dbs
+        .iter()
+        .map(|name| {
+            if name == &model.active_db_name {
+                ListItem::new(Line::styled(
+                    format!("* {name} (active)"),
+                    Style::new().fg(PRIMARY_COLOR).bold(),
+                ))
+            } else {
+                ListItem::new(Line::from(format!("  {name}")))
+            }
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(COLOR_TWO))
+                .title(" databases (Enter: switch, C: create new, Esc: back) ")
+                .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR)),
+        )
+        .highlight_style(Style::new().bg(COLOR_TWO).fg(FG_COLOR))
+        .direction(ListDirection::TopToBottom);
+
+    frame.render_stateful_widget(list, layout[1], &mut model.db_list_state);
+
+    render_status_line(model, frame, layout[2]);
+}
+
+fn render_new_database_name_view(model: &Model, frame: &mut Frame) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(6),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+
+    let hint = Paragraph::new(
+        "Enter a name for the new database. A file with this name (plus\n.db) will be created in ~/.local/share/bmm/",
+    )
+    .style(Style::new().white());
+    frame.render_widget(hint, layout[1]);
+
+    // keep 2 for borders and 1 for cursor
+    let width = layout[2].width.max(3) - 3;
+    let scroll = model.new_db_name_input.visual_scroll(width as usize);
+
+    let p = Paragraph::new(model.new_db_name_input.value())
+        .style(Style::default().fg(PRIMARY_COLOR))
+        .scroll((0, scroll as u16))
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(PRIMARY_COLOR))
+                .title(" database name (Enter/Ctrl+s: create, Esc: cancel) ")
+                .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
+        );
+    frame.render_widget(p, layout[2]);
+
+    let cursor_x = model.new_db_name_input.visual_cursor().max(scroll) - scroll + 1;
+    frame.set_cursor_position((layout[2].x + cursor_x as u16, layout[2].y + 1));
+
+    render_status_line(model, frame, layout[3]);
 }
 
 fn render_confirm_view(model: &Model, frame: &mut Frame) {

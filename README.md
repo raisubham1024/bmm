@@ -189,7 +189,13 @@ bmm save https://github.com/dhth/omm \
 
 # use your editor to provide details
 bmm save https://github.com/dhth/bmm -e
+
+# mark a bookmark as starred/favorite while saving it
+bmm save https://github.com/dhth/bmm --star
 ```
+
+Note: if you leave out the scheme (eg. `github.com/dhth/bmm` instead of
+`https://github.com/dhth/bmm`), `bmm` assumes `https://` by default.
 
 ### Saving/updating several bookmarks at a time
 
@@ -323,14 +329,16 @@ page](https://github.com/dhth/bmm/issues).
 ### TUI Reference Manual
 
 ```text
-bmm has six views.
+bmm has eight views.
 
 - Bookmarks List View
 - Tags List View
 - Edit Bookmark View
 - Notes View
+- Database List View
+- New Database Name View
 - Confirm View
-- Help View
+- Help View (this one)
 
 Keymaps
 ---
@@ -344,6 +352,7 @@ General
 Bookmarks List View
     s                    show search input
     Enter                submit search query (leave empty + Enter to show all bookmarks)
+    a                    add a new bookmark (URI, title, tags)
     t                    show Tags List View (when search is not active)
     d                    show bookmarks that have a duplicate title
     e                    edit the title/tags of the bookmark under cursor
@@ -352,6 +361,11 @@ Bookmarks List View
     n                    add/edit a note for the bookmark under cursor (hidden)
     N                    delete the note for the bookmark under cursor, if it
                          has one (asks for confirmation)
+    *                    toggle star on the bookmark under cursor
+    S                    show only starred bookmarks
+    A                    show/switch between databases
+    z                    search across all databases at once (results show
+                         which database each bookmark is from)
     Delete / D           delete the bookmark under cursor (asks for
                          confirmation)
     o                    open URI in browser
@@ -374,6 +388,16 @@ Notes View
     Ctrl+s               save the note (asks for confirmation)
     Esc                  cancel (asks for confirmation if there are
                          unsaved changes)
+
+Database List View
+    Enter                switch to the database under cursor for this
+                         session (resets to bmm.db next time you start bmm)
+    C                    create a new database
+    Esc                  go back
+
+New Database Name View
+    Enter / Ctrl+s       create the database and switch to it
+    Esc                  cancel
 
 Confirm View
     y                    confirm

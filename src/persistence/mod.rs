@@ -4,6 +4,7 @@ mod errors;
 mod get;
 mod init;
 mod notes;
+mod star;
 mod test_fixtures;
 mod update;
 
@@ -13,4 +14,5 @@ pub use errors::DBError;
 pub use get::*;
 pub use init::*;
 pub use notes::*;
+pub use star::*;
 pub use update::*;

@@ -3,9 +3,10 @@ use super::message::{Message, UrlsOpenedResult};
 use crate::common::DEFAULT_LIMIT;
 use crate::domain::{DraftBookmark, PotentialBookmark};
 use crate::persistence::{
-    SaveBookmarkOptions, create_or_update_bookmark, delete_bookmarks_with_uris, get_all_bookmarks,
-    get_bookmarks, get_bookmarks_by_query, get_duplicate_bookmarks, get_note, get_tags_with_stats,
-    rename_bookmark_uri, set_note,
+    DBError, SaveBookmarkOptions, create_or_update_bookmark, delete_bookmarks_with_uris,
+    get_all_bookmarks, get_bookmarks, get_bookmarks_by_query, get_db_pool,
+    get_duplicate_bookmarks, get_note, get_starred_bookmarks, get_starred_uris,
+    get_tags_with_stats, rename_bookmark_uri, set_note, toggle_starred,
 };
 use sqlx::{Pool, Sqlite};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -105,10 +106,50 @@ pub(super) async fn handle_command(
                 let _ = event_tx.try_send(Message::DuplicateBookmarksFetched(result));
             });
         }
-        Command::DeleteBookmark(uri) => {
+        Command::FetchStarredBookmarks => {
             let pool = pool.clone();
             tokio::spawn(async move {
-                let result = delete_bookmarks_with_uris(&pool, &vec![uri]).await;
+                let result = get_starred_bookmarks(&pool).await;
+                let _ = event_tx.try_send(Message::StarredBookmarksFetched(result));
+            });
+        }
+        Command::FetchStarredUris => {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let result = get_starred_uris(&pool).await;
+                let _ = event_tx.try_send(Message::StarredUrisFetched(result));
+            });
+        }
+        Command::ToggleStar(uri) => {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let result = toggle_starred(&pool, &uri)
+                    .await
+                    .map_err(|e| format!("{e}"));
+                let _ = event_tx.try_send(Message::StarToggled(uri, result));
+            });
+        }
+        Command::SwitchDatabase { path, display_name } => {
+            tokio::spawn(async move {
+                let result = get_db_pool(&path)
+                    .await
+                    .map(|new_pool| (new_pool, display_name))
+                    .map_err(|e| format!("{e}"));
+                let _ = event_tx.try_send(Message::DatabaseSwitched(result));
+            });
+        }
+        Command::DeleteBookmark(uri, target_db_path) => {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let result: Result<u64, DBError> = async {
+                    let target_pool = match &target_db_path {
+                        Some(path) => get_db_pool(path).await?,
+                        None => pool,
+                    };
+                    delete_bookmarks_with_uris(&target_pool, &vec![uri]).await
+                }
+                .await;
+
                 let _ = event_tx.try_send(Message::BookmarkDeleted(result));
             });
         }
@@ -133,23 +174,34 @@ pub(super) async fn handle_command(
             new_uri,
             title,
             tags,
+            is_new,
+            target_db_path,
         } => {
             let pool = pool.clone();
             tokio::spawn(async move {
                 let result: Result<(), String> = async {
+                    let target_pool = match &target_db_path {
+                        Some(path) => get_db_pool(path).await.map_err(|e| format!("{e}"))?,
+                        None => pool,
+                    };
+
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .map_err(|e| format!("system time error: {e}"))?
                         .as_secs() as i64;
 
-                    let effective_uri = match &new_uri {
-                        Some(target) if target != &uri => {
-                            rename_bookmark_uri(&pool, &uri, target, now)
-                                .await
-                                .map_err(|e| format!("{e}"))?;
-                            target.clone()
+                    let effective_uri = if is_new {
+                        uri
+                    } else {
+                        match &new_uri {
+                            Some(target) if target != &uri => {
+                                rename_bookmark_uri(&target_pool, &uri, target, now)
+                                    .await
+                                    .map_err(|e| format!("{e}"))?;
+                                target.clone()
+                            }
+                            _ => uri,
                         }
-                        _ => uri,
                     };
 
                     let potential_bookmark =
@@ -163,13 +215,68 @@ pub(super) async fn handle_command(
                         reset_tags: true,
                     };
 
-                    create_or_update_bookmark(&pool, &draft_bookmark, now, options)
+                    create_or_update_bookmark(&target_pool, &draft_bookmark, now, options)
                         .await
                         .map_err(|e| format!("{e}"))
                 }
                 .await;
 
                 let _ = event_tx.try_send(Message::BookmarkUpdated(result));
+            });
+        }
+        Command::GlobalSearch(search_terms) => {
+            tokio::spawn(async move {
+                let mut all_results: Vec<(String, String, crate::domain::SavedBookmark)> =
+                    Vec::new();
+                let mut errors: Vec<String> = Vec::new();
+
+                if let Ok(data_dir) = crate::utils::get_data_dir() {
+                    let bmm_dir = data_dir.join("bmm");
+
+                    if let Ok(entries) = std::fs::read_dir(&bmm_dir) {
+                        let mut db_files: Vec<(String, String)> = Vec::new();
+
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.extension().and_then(|e| e.to_str()) != Some("db") {
+                                continue;
+                            }
+                            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                                continue;
+                            };
+                            let Some(path_str) = path.to_str() else {
+                                continue;
+                            };
+                            db_files.push((name.to_string(), path_str.to_string()));
+                        }
+
+                        for (name, path) in db_files {
+                            match get_db_pool(&path).await {
+                                Ok(db_pool) => {
+                                    let result = match &search_terms {
+                                        Some(terms) => {
+                                            get_bookmarks_by_query(&db_pool, terms, DEFAULT_LIMIT)
+                                                .await
+                                        }
+                                        None => get_all_bookmarks(&db_pool).await,
+                                    };
+
+                                    match result {
+                                        Ok(bookmarks) => {
+                                            for b in bookmarks {
+                                                all_results.push((name.clone(), path.clone(), b));
+                                            }
+                                        }
+                                        Err(e) => errors.push(format!("{name}: {e}")),
+                                    }
+                                }
+                                Err(e) => errors.push(format!("{name}: {e}")),
+                            }
+                        }
+                    }
+                }
+
+                let _ = event_tx.try_send(Message::GlobalSearchFinished(all_results, errors));
             });
         }
         Command::CopyContentToClipboard(content) => {
