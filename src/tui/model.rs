@@ -475,7 +475,7 @@ impl Model {
         self.active_pane = ActivePane::TagsList;
     }
 
-    pub(super) fn get_cmd_to_open_selection_in_browser(&self) -> Option<Command> {
+    pub(super) fn get_cmd_to_open_selection_in_browser(&self, incognito: bool) -> Option<Command> {
         let url = match self.bookmark_items.state.selected() {
             Some(i) => match self.bookmark_items.items.get(i) {
                 Some(bi) => bi.bookmark.uri.clone(),
@@ -484,10 +484,14 @@ impl Model {
             None => return None,
         };
 
-        Some(Command::OpenInBrowser(url))
+        if incognito {
+            Some(Command::OpenInBrowserIncognito(url))
+        } else {
+            Some(Command::OpenInBrowser(url))
+        }
     }
 
-    pub(super) fn request_open_all_in_browser(&mut self) -> Option<Command> {
+    pub(super) fn request_open_all_in_browser(&mut self, incognito: bool) -> Option<Command> {
         if self.active_pane != ActivePane::List {
             return None;
         }
@@ -508,6 +512,8 @@ impl Model {
             self.pane_before_confirm = ActivePane::List;
             self.active_pane = ActivePane::Confirm;
             None
+        } else if incognito {
+            Some(Command::OpenMultipleInBrowserIncognito(uris))
         } else {
             Some(Command::OpenMultipleInBrowser(uris))
         }

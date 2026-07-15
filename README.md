@@ -326,6 +326,25 @@ page](https://github.com/dhth/bmm/issues).
 
 ![tui](https://github.com/user-attachments/assets/6ca63039-8872-4520-93da-1576cc0cf8ec)
 
+### Opening bookmarks in incognito/private mode (TUI)
+
+Inside the TUI, `i` opens the bookmark under the cursor in an incognito/
+private window, and `I` does the same for every bookmark currently listed.
+`bmm` tries to detect a supported browser automatically (Chrome, Chromium,
+Brave, Edge, or Firefox). If it can't find one, or you want to force a
+specific browser, set these environment variables:
+
+```bash
+# executable name (desktop) or app name (macOS) of your browser
+export BMM_BROWSER=brave-browser
+
+# only needed if your browser isn't chromium/firefox-style
+export BMM_BROWSER_INCOGNITO_FLAG=--incognito
+```
+
+Note: on Android, incognito-opening only works if Chrome is your installed
+browser, since Android has no generic "open incognito" mechanism.
+
 ### TUI Reference Manual
 
 ```text
@@ -369,7 +388,10 @@ Bookmarks List View
     Delete / D           delete the bookmark under cursor (asks for
                          confirmation)
     o                    open URI in browser
+    i                    open URI in browser (incognito/private window)
     O                    open all listed bookmarks in browser (max 30; warns if more)
+    I                    open all listed bookmarks in browser, incognito/private
+                         (max 30; warns if more)
     y                    copy URI under cursor to system clipboard
     Y                    copy all URIs to system clipboard
 

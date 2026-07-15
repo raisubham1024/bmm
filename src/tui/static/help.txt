@@ -38,7 +38,10 @@ Bookmarks List View
     Delete / D           delete the bookmark under cursor (asks for
                          confirmation)
     o                    open URI in browser
+    i                    open URI in browser (incognito/private window)
     O                    open all listed bookmarks in browser (max 30; warns if more)
+    I                    open all listed bookmarks in browser, incognito/private
+                         (max 30; warns if more)
     y                    copy URI under cursor to system clipboard
     Y                    copy all URIs to system clipboard
 

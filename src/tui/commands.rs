@@ -3,7 +3,9 @@ use crate::persistence::SearchTerms;
 #[derive(Clone, Debug)]
 pub(super) enum Command {
     OpenInBrowser(String),
+    OpenInBrowserIncognito(String),
     OpenMultipleInBrowser(Vec<String>),
+    OpenMultipleInBrowserIncognito(Vec<String>),
     SearchBookmarks(SearchTerms),
     FetchAllBookmarks,
     FetchTags,

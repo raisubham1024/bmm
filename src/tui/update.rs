@@ -11,12 +11,22 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         Message::GoToNextListItem => model.select_next_list_item(),
         Message::GoToPreviousListItem => model.select_previous_list_item(),
         Message::OpenInBrowser => {
-            if let Some(c) = model.get_cmd_to_open_selection_in_browser() {
+            if let Some(c) = model.get_cmd_to_open_selection_in_browser(false) {
+                cmds.push(c)
+            }
+        }
+        Message::OpenInBrowserIncognito => {
+            if let Some(c) = model.get_cmd_to_open_selection_in_browser(true) {
                 cmds.push(c)
             }
         }
         Message::RequestOpenAllInBrowser => {
-            if let Some(c) = model.request_open_all_in_browser() {
+            if let Some(c) = model.request_open_all_in_browser(false) {
+                cmds.push(c);
+            }
+        }
+        Message::RequestOpenAllInBrowserIncognito => {
+            if let Some(c) = model.request_open_all_in_browser(true) {
                 cmds.push(c);
             }
         }
