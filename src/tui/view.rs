@@ -1,5 +1,5 @@
 use super::common::*;
-use super::model::{MessageKind, Model};
+use super::model::{MessageKind, ModeOption, Model};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -39,6 +39,7 @@ pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
         ActivePane::DatabaseList => render_database_list_view(model, frame),
         ActivePane::NewDatabaseName => render_new_database_name_view(model, frame),
         ActivePane::Confirm => render_confirm_view(model, frame),
+        ActivePane::ModeSwitcher => render_mode_switcher_view(model, frame),
     }
 }
 
@@ -180,6 +181,12 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
         ActivePane::Confirm => {
             header_components.push(Span::styled(
                 " confirm ",
+                Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR),
+            ));
+        }
+        ActivePane::ModeSwitcher => {
+            header_components.push(Span::styled(
+                " switch mode ",
                 Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR),
             ));
         }
@@ -824,5 +831,49 @@ fn render_help_view(model: &mut Model, frame: &mut Frame) {
         .alignment(Alignment::Left);
 
     frame.render_widget(p, layout[1]);
+    render_status_line(model, frame, layout[2]);
+}
+
+fn render_mode_switcher_view(model: &mut Model, frame: &mut Frame) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(10),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+
+    let items: Vec<ListItem> = ModeOption::ALL
+        .iter()
+        .map(|mode| {
+            let label = mode.label();
+            let hint = mode.key_hint();
+            let line = if hint.is_empty() {
+                Line::from(format!("  {label}"))
+            } else {
+                Line::from(vec![
+                    Span::from(format!("  {label} ")),
+                    Span::styled(format!("[{hint}]"), Style::new().fg(COLOR_THREE)),
+                ])
+            };
+            ListItem::new(line)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(PRIMARY_COLOR))
+                .title(" switch mode (Enter: select, Alt+m/Esc: close) ")
+                .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
+        )
+        .highlight_style(Style::new().bg(PRIMARY_COLOR).fg(FG_COLOR))
+        .direction(ListDirection::TopToBottom);
+
+    frame.render_stateful_widget(list, layout[1], &mut model.mode_switcher_state);
+
     render_status_line(model, frame, layout[2]);
 }

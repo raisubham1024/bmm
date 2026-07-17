@@ -25,6 +25,7 @@ pub(crate) enum ActivePane {
     NewDatabaseName,
     Confirm,
     Help,
+    ModeSwitcher,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

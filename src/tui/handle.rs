@@ -70,6 +70,15 @@ pub(super) async fn handle_command(
         }
         Command::OpenInBrowserIncognito(url) => {
             tokio::spawn(async move {
+                #[cfg(target_os = "android")]
+                let message = match crate::platform::open_url_incognito(&url) {
+                    Ok(_) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::SuccessNeedsPaste(1)),
+                    Err(e) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(
+                        std::io::Error::other(e),
+                    )),
+                };
+
+                #[cfg(not(target_os = "android"))]
                 let message = match crate::platform::open_url_incognito(&url) {
                     Ok(_) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::Success),
                     Err(e) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(
@@ -82,30 +91,46 @@ pub(super) async fn handle_command(
         }
         Command::OpenMultipleInBrowserIncognito(urls) => {
             tokio::spawn(async move {
-                let mut failures: Vec<String> = Vec::new();
+                // On Android, Chrome won't let a third-party app load urls
+                // straight into incognito tabs (see the comment on
+                // platform::termux::open_incognito_tab), so instead of
+                // opening one blank incognito tab per url (confusing, and
+                // it'd only ever be useful for the last one anyway), we
+                // copy the whole list to the clipboard - one url per line -
+                // and open a single blank incognito tab.
+                #[cfg(target_os = "android")]
+                let message = {
+                    let count = urls.len();
+                    let result = crate::platform::copy_to_clipboard(&urls.join("\n"))
+                        .and_then(|_| crate::platform::open_incognito_tab());
 
-                let delay_between_opens = if cfg!(target_os = "android") {
-                    std::time::Duration::from_millis(400)
-                } else {
-                    std::time::Duration::ZERO
+                    match result {
+                        Ok(_) => {
+                            Message::UrlsOpenedInBrowser(UrlsOpenedResult::SuccessNeedsPaste(count))
+                        }
+                        Err(e) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(
+                            std::io::Error::other(e),
+                        )),
+                    }
                 };
 
-                for (i, url) in urls.iter().enumerate() {
-                    if i > 0 && !delay_between_opens.is_zero() {
-                        tokio::time::sleep(delay_between_opens).await;
+                #[cfg(not(target_os = "android"))]
+                let message = {
+                    let mut failures: Vec<String> = Vec::new();
+
+                    for url in &urls {
+                        if let Err(e) = crate::platform::open_url_incognito(url) {
+                            failures.push(format!("{url}: {e}"));
+                        }
                     }
 
-                    if let Err(e) = crate::platform::open_url_incognito(url) {
-                        failures.push(format!("{url}: {e}"));
+                    if failures.is_empty() {
+                        Message::UrlsOpenedInBrowser(UrlsOpenedResult::Success)
+                    } else {
+                        Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(
+                            std::io::Error::other(failures.join("; ")),
+                        ))
                     }
-                }
-
-                let message = if failures.is_empty() {
-                    Message::UrlsOpenedInBrowser(UrlsOpenedResult::Success)
-                } else {
-                    Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(std::io::Error::other(
-                        failures.join("; "),
-                    )))
                 };
 
                 let _ = event_tx.try_send(message);

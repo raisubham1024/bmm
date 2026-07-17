@@ -1,4 +1,4 @@
-bmm has eight views.
+bmm has nine views.
 
 - Bookmarks List View
 - Tags List View
@@ -7,6 +7,7 @@ bmm has eight views.
 - Database List View
 - New Database Name View
 - Confirm View
+- Mode Switcher View
 - Help View (this one)
 
 Keymaps
@@ -14,6 +15,10 @@ Keymaps
 
 General
     ?                    show/hide help view
+    Alt+m                show mode switcher (jump straight to any view:
+                         all bookmarks, search, tags, duplicates, starred,
+                         global search, databases, help) - works from any
+                         view, press again (or Esc/q) to close it
     Esc / q              go back/reset input/exit
     j / Down             go down in a list
     k / Up               go up in a list
@@ -70,6 +75,11 @@ Database List View
 New Database Name View
     Enter / Ctrl+s       create the database and switch to it
     Esc                  cancel
+
+Mode Switcher View
+    j / k / Down / Up    move selection
+    Enter                jump to the selected view
+    Alt+m / Esc / q      close without switching
 
 Confirm View
     y                    confirm

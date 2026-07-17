@@ -1,4 +1,4 @@
-use super::{commands::Command, common::*};
+use super::{commands::Command, common::*, message::Message};
 use crate::{
     domain::{SavedBookmark, TagStats},
     persistence::SearchTerms,
@@ -17,6 +17,74 @@ pub(crate) enum RunningState {
     #[default]
     Running,
     Done,
+}
+
+/// The list of "modes" shown by the Alt+m mode switcher. Each one maps to
+/// the exact same [`Message`] that its existing single-key shortcut already
+/// sends, so selecting one from the switcher behaves identically to typing
+/// that shortcut from the list view - no new/duplicate transition logic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum ModeOption {
+    AllBookmarks,
+    Search,
+    Tags,
+    Duplicates,
+    Starred,
+    GlobalSearch,
+    Databases,
+    Help,
+}
+
+impl ModeOption {
+    pub(super) const ALL: [ModeOption; 8] = [
+        ModeOption::AllBookmarks,
+        ModeOption::Search,
+        ModeOption::Tags,
+        ModeOption::Duplicates,
+        ModeOption::Starred,
+        ModeOption::GlobalSearch,
+        ModeOption::Databases,
+        ModeOption::Help,
+    ];
+
+    pub(super) fn label(&self) -> &'static str {
+        match self {
+            ModeOption::AllBookmarks => "all bookmarks",
+            ModeOption::Search => "search this database",
+            ModeOption::Tags => "browse by tag",
+            ModeOption::Duplicates => "duplicate bookmarks",
+            ModeOption::Starred => "starred bookmarks",
+            ModeOption::GlobalSearch => "search across all databases",
+            ModeOption::Databases => "switch database",
+            ModeOption::Help => "help",
+        }
+    }
+
+    pub(super) fn key_hint(&self) -> &'static str {
+        match self {
+            ModeOption::AllBookmarks => "",
+            ModeOption::Search => "s",
+            ModeOption::Tags => "t",
+            ModeOption::Duplicates => "d",
+            ModeOption::Starred => "S",
+            ModeOption::GlobalSearch => "z",
+            ModeOption::Databases => "A",
+            ModeOption::Help => "?",
+        }
+    }
+
+    pub(super) fn into_message(self) -> Message {
+        match self {
+            ModeOption::AllBookmarks => Message::ShowAllBookmarks,
+            ModeOption::Search => Message::ShowView(ActivePane::SearchInput),
+            ModeOption::Tags => Message::ShowView(ActivePane::TagsList),
+            ModeOption::Duplicates => Message::ShowDuplicates,
+            ModeOption::Starred => Message::ShowStarred,
+            ModeOption::GlobalSearch => Message::ShowGlobalSearch,
+            ModeOption::Databases => Message::ShowDatabaseList,
+            ModeOption::Help => Message::ShowView(ActivePane::Help),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -248,6 +316,8 @@ pub(super) struct Model {
     pub(super) db_list_state: ListState,
     pub(super) new_db_name_input: Input,
     pub(super) global_search_mode: bool,
+    pub(super) mode_switcher_state: ListState,
+    pub(super) pane_before_mode_switch: ActivePane,
 }
 
 impl Model {
@@ -310,6 +380,8 @@ impl Model {
             db_list_state: ListState::default(),
             new_db_name_input: Input::default(),
             global_search_mode: false,
+            mode_switcher_state: ListState::default(),
+            pane_before_mode_switch: active_pane,
         }
     }
 
@@ -320,6 +392,7 @@ impl Model {
                 self.tag_items.state.select_next()
             }
             ActivePane::DatabaseList => self.db_list_state.select_next(),
+            ActivePane::ModeSwitcher => self.mode_switcher_state.select_next(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
@@ -336,6 +409,7 @@ impl Model {
                 self.tag_items.state.select_previous()
             }
             ActivePane::DatabaseList => self.db_list_state.select_previous(),
+            ActivePane::ModeSwitcher => self.mode_switcher_state.select_previous(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
@@ -352,6 +426,7 @@ impl Model {
                 self.tag_items.state.select_first()
             }
             ActivePane::DatabaseList => self.db_list_state.select_first(),
+            ActivePane::ModeSwitcher => self.mode_switcher_state.select_first(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
@@ -367,6 +442,7 @@ impl Model {
                 self.tag_items.state.select_last()
             }
             ActivePane::DatabaseList => self.db_list_state.select_last(),
+            ActivePane::ModeSwitcher => self.mode_switcher_state.select_last(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
@@ -388,6 +464,7 @@ impl Model {
             ActivePane::DatabaseList => view,
             ActivePane::NewDatabaseName => view,
             ActivePane::Confirm => view,
+            ActivePane::ModeSwitcher => view,
         };
 
         match view {
@@ -407,6 +484,7 @@ impl Model {
             ActivePane::DatabaseList => None,
             ActivePane::NewDatabaseName => None,
             ActivePane::Confirm => None,
+            ActivePane::ModeSwitcher => None,
         }
     }
 
@@ -445,6 +523,9 @@ impl Model {
             }
             ActivePane::TagsList => {
                 self.active_pane = ActivePane::List;
+            }
+            ActivePane::ModeSwitcher => {
+                self.active_pane = self.pane_before_mode_switch;
             }
         };
     }
@@ -761,6 +842,24 @@ impl Model {
     pub(super) fn cancel_confirm(&mut self) {
         self.pending_confirmation = None;
         self.active_pane = self.pane_before_confirm;
+    }
+
+    //-------------------------------//
+    //  mode switcher (Alt+m)         //
+    //-------------------------------//
+
+    /// Opens the mode switcher overlay, remembering the pane it was opened
+    /// from so Esc/q can return to it unchanged. Safe to call from any
+    /// pane, including the mode switcher itself (in which case it's a
+    /// no-op - the caller is expected to handle "already open" as a
+    /// toggle-close instead, see `Message::ToggleModeSwitcher`).
+    pub(super) fn open_mode_switcher(&mut self) {
+        if self.active_pane == ActivePane::ModeSwitcher {
+            return;
+        }
+        self.pane_before_mode_switch = self.active_pane;
+        self.mode_switcher_state.select(Some(0));
+        self.active_pane = ActivePane::ModeSwitcher;
     }
 
     //-------------------------------//

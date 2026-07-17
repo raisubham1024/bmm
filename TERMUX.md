@@ -66,13 +66,54 @@ Agar `termux-clipboard-set`/`termux-open-url` command hi na mile, `bmm` ab
 crash nahi karega — clear error dega ("termux-api command not found... pkg
 install termux-api") jisse pata chal jaayega exactly kya missing hai.
 
-## Note
+## Baad mein fix kiye gaye 2 aur Android-specific bugs
 
-Ye sandbox environment me maine Rust 1.75 (Ubuntu apt) se hi verify kiya —
-`edition = "2024"` (jo ye repo use karta hai) ke liye Rust >= 1.85 chahiye,
-jo is sandbox me install nahi ho paaya (rustup ka domain network policy me
-allowed nahi hai). Maine code **manually carefully review** kiya hai aur
-logic straightforward hai (bas process spawn + stdin write), lekin **aapko
-apne Termux/Linux machine pe ek baar `cargo build` chalana chahiye** taaki
-confirm ho jaaye. Agar koi compile error aaye to woh mujhe paste kar dena,
-turant fix kar dunga.
+### 1. `i`/`I` (incognito open) sirf Chrome khol raha tha, URL load nahi kar raha tha, incognito bhi on nahi ho raha tha
+
+**Asli wajah:** `platform.rs` pehle Chrome ke `EXTRA_OPEN_NEW_INCOGNITO_TAB` intent extra ka
+use kar raha tha (wahi wala jo ADB one-liners mein aam dikhta hai). Chrome ye extra
+**jaan-boojh kar ignore kar deta hai** jab intent kisi aise app se aaye jo Google se
+sign nahi hai — Termux definitely Google-signed nahi hai. Isliye Chrome bas normally
+khul jaata tha, na URL pe navigate karta tha na incognito on hota tha.
+
+**Fix:** Ab `org.chromium.chrome.browser.incognito.OPEN_PRIVATE_TAB` action use hota
+hai, jo **kisi bhi app** ke liye publicly available hai (koi signature check nahi).
+Lekin — ye bhi jaan-boojh kar (privacy ke liye) **URL accept nahi karta**, sirf ek
+blank incognito tab khol sakta hai. Isliye ab flow ye hai:
+1. URL (ya, `I` ke case mein, poori list ek-ek line mein) clipboard pe copy hoti hai
+2. Ek blank incognito tab khulta hai
+3. TUI mein ek info message dikhta hai jo bata deta hai ki paste karna hai
+
+Ye Android/Chrome ki genuine platform-level restriction hai (koi third-party app URL
+seedha incognito mein load nahi karwa sakta), na ki bmm ka koi bug — isliye ye best
+possible fix hai is limitation ke andar rehte hue.
+
+### 2. Mobile pe `Y` (list copy) kaam nahi kar raha tha, sirf `y` (single copy) kaam kar raha tha
+
+**Asli wajah:** Kuch Android soft-keyboards/terminal setups Shift+Y ko uppercase
+`'Y'` character ki jagah lowercase `'y'` + `SHIFT` modifier flag ke roop mein bhejte
+hain. Desktop/hardware keyboards par ye issue nahi aata kyunki wahan terminal khud hi
+Shift ko uppercase character mein convert kar deta hai crossterm tak pahunchne se
+pehle.
+
+**Fix:** `src/tui/message.rs` mein ab `Char('y')` + `SHIFT` modifier wale combination
+ko bhi `CopyURIsToClipboard` (wahi jo `Y` karta hai) maana jaata hai, `Char('Y')` wale
+match ke saath-saath. List copy pehle se hi ek link per line clipboard pe jaati thi
+(`uris.join("\n")`), wo waisa hi hai.
+
+### Note on testing
+
+Ye do fixes bhi maine real Termux device pe test nahi kiye (upar wajah dekhein — is
+sandbox mein Rust 1.85+ install nahi ho paaya). Logic maine bahut carefully review
+kiya hai aur upar bataye gaye root causes verified/well-documented hain (Chromium ke
+source code discussion se confirm kiya), lekin **ek baar apne Termux pe build karke
+zaroor test karein**. Agar `am start -a org.chromium.chrome.browser.incognito.OPEN_PRIVATE_TAB`
+wala command directly terminal mein chala ke dekhein to bhi kaam karna chahiye:
+
+```bash
+am start -a org.chromium.chrome.browser.incognito.OPEN_PRIVATE_TAB -n com.android.chrome/com.google.android.apps.chrome.Main
+```
+
+Agar aapka default browser Chrome nahi hai (ya package name `com.android.chrome` nahi
+hai), to ye command fail hoga — is case mein bata dena, alag logic likhna padega.
+

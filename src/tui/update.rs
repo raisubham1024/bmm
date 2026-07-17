@@ -30,13 +30,61 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 cmds.push(c);
             }
         }
-        Message::UrlsOpenedInBrowser(result) => {
-            if let UrlsOpenedResult::Failure(e) = result {
+        Message::UrlsOpenedInBrowser(result) => match result {
+            UrlsOpenedResult::Failure(e) => {
                 model.user_message =
                     Some(UserMessage::error(&format!("urls couldn't be opened: {e}")));
             }
-        }
+            #[cfg(target_os = "android")]
+            UrlsOpenedResult::SuccessNeedsPaste(count) => {
+                let msg = if count == 1 {
+                    "opened a new incognito tab; link copied to clipboard, paste it in \
+(android doesn't let apps load a url straight into incognito mode)"
+                        .to_string()
+                } else {
+                    format!(
+                        "opened a new incognito tab; {count} links copied to clipboard \
+(one per line), paste to open them"
+                    )
+                };
+                model.user_message = Some(UserMessage::info(&msg).with_frames_left(6));
+            }
+            UrlsOpenedResult::Success => {}
+        },
         Message::GoBackOrQuit => model.go_back_or_quit(),
+        Message::ToggleModeSwitcher => {
+            if model.active_pane == ActivePane::ModeSwitcher {
+                model.active_pane = model.pane_before_mode_switch;
+            } else {
+                model.open_mode_switcher();
+            }
+        }
+        Message::ConfirmModeSelection => {
+            let selected_mode = model
+                .mode_switcher_state
+                .selected()
+                .and_then(|i| ModeOption::ALL.get(i).copied());
+
+            // Go back to a "normal" pane before dispatching the chosen
+            // mode's message, same as if the user had pressed Esc/q then
+            // that mode's own shortcut key - this keeps every mode's
+            // transition logic exactly as it already was (nothing here is
+            // mode-switcher-specific), and avoids `show_view`'s "coming
+            // from Help" special case misfiring for a pane that isn't
+            // actually Help.
+            model.active_pane = ActivePane::List;
+
+            if let Some(mode) = selected_mode {
+                let follow_up_cmds = update(model, mode.into_message());
+                cmds.extend(follow_up_cmds);
+            }
+        }
+        Message::ShowAllBookmarks => {
+            model.global_search_mode = false;
+            model.initial = false;
+            model.active_pane = ActivePane::List;
+            cmds.push(Command::FetchAllBookmarks);
+        }
         Message::ShowView(view) => {
             if let Some(c) = model.show_view(view) {
                 cmds.push(c);

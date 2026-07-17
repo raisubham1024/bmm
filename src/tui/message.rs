@@ -67,10 +67,20 @@ pub enum Message {
     ConfirmNo,
     ContentCopiedToClipboard(Result<(), String>),
     GoBackOrQuit,
+    ToggleModeSwitcher,
+    ConfirmModeSelection,
+    ShowAllBookmarks,
 }
 
 pub enum UrlsOpenedResult {
     Success,
+    /// Android-only: the incognito tab was opened, but couldn't be loaded
+    /// with the url(s) directly (Chrome doesn't allow third-party apps to
+    /// do that) — they were copied to the clipboard instead. The count is
+    /// how many urls were copied, so the message shown can say "1 link" vs
+    /// "N links".
+    #[cfg(target_os = "android")]
+    SuccessNeedsPaste(usize),
     Failure(IOError),
 }
 
@@ -85,7 +95,24 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                 _ => None,
             },
             false => match key_event.kind {
-                KeyEventKind::Press => match model.active_pane {
+                KeyEventKind::Press => {
+                    // Alt+m opens/closes the mode switcher from anywhere,
+                    // regardless of which pane is currently active - this
+                    // has to be checked before the per-pane match below, or
+                    // panes that treat any unmatched key as text input
+                    // (search, edit, notes, ...) would swallow it as a
+                    // literal 'm' instead.
+                    if key_event.modifiers.contains(KeyModifiers::ALT)
+                        && key_event.code == KeyCode::Char('m')
+                    {
+                        return if model.active_pane == ActivePane::ModeSwitcher {
+                            Some(Message::GoBackOrQuit)
+                        } else {
+                            Some(Message::ToggleModeSwitcher)
+                        };
+                    }
+
+                    match model.active_pane {
                     ActivePane::List => match key_event.code {
                         KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
                         KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
@@ -111,6 +138,11 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('n') => Some(Message::StartNoteEdit),
                         KeyCode::Char('N') => Some(Message::RequestDeleteNote),
                         KeyCode::Delete => Some(Message::RequestDeleteBookmark),
+                        KeyCode::Char('y')
+                            if key_event.modifiers.contains(KeyModifiers::SHIFT) =>
+                        {
+                            Some(Message::CopyURIsToClipboard)
+                        }
                         KeyCode::Char('y') => Some(Message::CopyURIToClipboard),
                         KeyCode::Char('Y') => Some(Message::CopyURIsToClipboard),
                         KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
@@ -193,7 +225,17 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         }
                         _ => None,
                     },
-                },
+                    ActivePane::ModeSwitcher => match key_event.code {
+                        KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
+                        KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
+                        KeyCode::Char('g') => Some(Message::GoToFirstListItem),
+                        KeyCode::Char('G') => Some(Message::GoToLastListItem),
+                        KeyCode::Enter => Some(Message::ConfirmModeSelection),
+                        KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
+                        _ => None,
+                    },
+                    }
+                }
                 _ => None,
             },
         },

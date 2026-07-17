@@ -164,21 +164,30 @@ then run: pkg install termux-api";
         }
     }
 
-    // There's no generic "open incognito" intent on Android; this uses
-    // Chrome's specific incognito-tab intent extra, which is the most
-    // common default browser. If your default browser isn't Chrome, this
-    // will likely fail or silently open a normal tab instead.
-    pub fn open_url_incognito(url: &str) -> Result<(), String> {
+    // NOTE on why this doesn't just fire a VIEW intent with the
+    // "EXTRA_OPEN_NEW_INCOGNITO_TAB" extra (like some ADB one-liners do):
+    // Chrome deliberately ignores that extra when it comes from an app it
+    // doesn't trust (i.e. one that isn't signed by Google) — see Chromium's
+    // own `ChromeTabbedActivity`/`IncognitoTabLauncher` source, which checks
+    // `isTrustedIntent()` specifically to stop third-party apps from doing
+    // this. Termux isn't a Google-signed app, so that check fails: Chrome
+    // just cold-opens normally, without navigating anywhere and without
+    // incognito — which is exactly the "just opens Chrome and does nothing
+    // else" behavior this is fixing.
+    //
+    // What Chrome *does* expose for any caller is the public
+    // "org.chromium.chrome.browser.incognito.OPEN_PRIVATE_TAB" action. It
+    // opens a blank incognito tab, but (also deliberately, for privacy
+    // reasons — it stops one app leaking what you view in incognito to
+    // another) it has no way to carry a URL along with it. So we copy the
+    // url to the clipboard first and open a blank incognito tab; the
+    // message shown to the user in the TUI explains that it needs a paste.
+    pub fn open_incognito_tab() -> Result<(), String> {
         let output = Command::new("am")
             .args([
                 "start",
                 "-a",
-                "android.intent.action.VIEW",
-                "-d",
-                url,
-                "--ez",
-                "com.google.android.apps.chrome.EXTRA_OPEN_NEW_INCOGNITO_TAB",
-                "true",
+                "org.chromium.chrome.browser.incognito.OPEN_PRIVATE_TAB",
                 "-n",
                 "com.android.chrome/com.google.android.apps.chrome.Main",
             ])
@@ -195,10 +204,15 @@ com.android.chrome): {stderr}"
             ))
         }
     }
+
+    pub fn open_url_incognito(url: &str) -> Result<(), String> {
+        copy_to_clipboard(url)?;
+        open_incognito_tab()
+    }
 }
 
 #[cfg(not(target_os = "android"))]
 pub use desktop::{copy_to_clipboard, open_url, open_url_incognito};
 
 #[cfg(target_os = "android")]
-pub use termux::{copy_to_clipboard, open_url, open_url_incognito};
+pub use termux::{copy_to_clipboard, open_incognito_tab, open_url, open_url_incognito};
