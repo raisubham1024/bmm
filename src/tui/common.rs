@@ -22,10 +22,22 @@ pub(crate) enum ActivePane {
     EditBookmark,
     Notes,
     DatabaseList,
+    DatabaseSearchInput,
     NewDatabaseName,
     Confirm,
     Help,
     ModeSwitcher,
+}
+
+/// Which task the [`ActivePane::DatabaseList`] / [`ActivePane::DatabaseSearchInput`]
+/// panes are currently being used for - they're shared between the "switch
+/// active database" flow (`A`) and the "move bookmark(s) to another
+/// database" flow (`m` / `M`), since both are just "pick a database from
+/// the list" at their core.
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub(crate) enum DbListPurpose {
+    Switch,
+    Move,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

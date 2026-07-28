@@ -1,14 +1,13 @@
 use super::common::*;
+use super::help_content::HELP_SECTIONS;
 use super::model::{MessageKind, ModeOption, Model};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, List, ListDirection, ListItem, Padding, Paragraph},
+    widgets::{Block, Cell, List, ListDirection, ListItem, Padding, Paragraph, Row, Table},
 };
-
-const HELP_CONTENTS: &str = include_str!("static/help.txt");
 
 pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
     if model.terminal_too_small {
@@ -36,7 +35,8 @@ pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
         ActivePane::TagSearchInput => render_tag_list_view(model, frame, true),
         ActivePane::EditBookmark => render_edit_bookmark_view(model, frame),
         ActivePane::Notes => render_notes_view(model, frame),
-        ActivePane::DatabaseList => render_database_list_view(model, frame),
+        ActivePane::DatabaseList => render_database_list_view(model, frame, false),
+        ActivePane::DatabaseSearchInput => render_database_list_view(model, frame, true),
         ActivePane::NewDatabaseName => render_new_database_name_view(model, frame),
         ActivePane::Confirm => render_confirm_view(model, frame),
         ActivePane::ModeSwitcher => render_mode_switcher_view(model, frame),
@@ -124,6 +124,22 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                     Style::new().fg(COLOR_THREE),
                 ));
             }
+
+            if model.note_search_mode {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    " note search ",
+                    Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+                ));
+            }
+
+            if !model.marked_uris.is_empty() {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    format!(" {} marked ", model.marked_uris.len()),
+                    Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+                ));
+            }
         }
         ActivePane::Help => {
             header_components.push(Span::styled(
@@ -166,9 +182,13 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                 Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
             ));
         }
-        ActivePane::DatabaseList => {
+        ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
+            let text = match model.db_list_purpose {
+                DbListPurpose::Switch => " databases ",
+                DbListPurpose::Move => " move bookmark(s) ",
+            };
             header_components.push(Span::styled(
-                " databases ",
+                text,
                 Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
             ));
         }
@@ -252,12 +272,20 @@ fn render_search_input(model: &Model, frame: &mut Frame, chunk: Rect) {
     let width = chunk.width.max(3) - 3;
     let scroll = model.search_input.visual_scroll(width as usize);
 
+    let title = if model.note_search_mode {
+        " search notes? "
+    } else if model.global_search_mode {
+        " search all databases? "
+    } else {
+        " search query? "
+    };
+
     let input = Paragraph::new(model.search_input.value())
         .style(Style::default().fg(COLOR_THREE))
         .scroll((0, scroll as u16))
         .block(
             Block::bordered()
-                .title(" search query? ")
+                .title(title)
                 .title_style(Style::new().bold().bg(COLOR_THREE).fg(FG_COLOR)),
         );
     frame.render_widget(input, chunk);
@@ -324,7 +352,7 @@ fn render_bookmarks_details(model: &Model, frame: &mut Frame, chunk: Rect) {
     if let Some(selected) = maybe_selected {
         let maybe_bookmark_item = model.bookmark_items.items.get(selected);
         if let Some(bookmark_item) = maybe_bookmark_item {
-            let details = format!(
+            let mut details = format!(
                 r#"URI   : {}
 Title : {}
 Tags  : {}
@@ -341,6 +369,11 @@ Tags  : {}
                     .as_deref()
                     .unwrap_or("<NOT SET>")
             );
+
+            if bookmark_item.has_note == Some(true) {
+                details.push_str("Notes : yes\n");
+            }
+
             let details = Paragraph::new(details)
                 .block(
                     Block::bordered()
@@ -700,20 +733,32 @@ fn render_note_field(model: &Model, frame: &mut Frame, chunk: Rect) {
     frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
 }
 
-fn render_database_list_view(model: &mut Model, frame: &mut Frame) {
-    let layout = Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints(vec![
-            Constraint::Length(2),
-            Constraint::Min(10),
-            Constraint::Length(1),
-        ])
-        .split(frame.area());
+fn render_database_list_view(model: &mut Model, frame: &mut Frame, search: bool) {
+    let layout = if search {
+        Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints(vec![
+                Constraint::Length(2),
+                Constraint::Min(8),
+                Constraint::Length(3),
+                Constraint::Length(1),
+            ])
+            .split(frame.area())
+    } else {
+        Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints(vec![
+                Constraint::Length(2),
+                Constraint::Min(10),
+                Constraint::Length(1),
+            ])
+            .split(frame.area())
+    };
 
     render_header(model, frame, layout[0]);
 
     let items: Vec<ListItem> = model
-        .available_dbs
+        .filtered_dbs
         .iter()
         .map(|name| {
             if name == &model.active_db_name {
@@ -727,11 +772,16 @@ fn render_database_list_view(model: &mut Model, frame: &mut Frame) {
         })
         .collect();
 
+    let title = match model.db_list_purpose {
+        DbListPurpose::Switch => " databases (Enter: switch, /: search, C: create new, Esc: back) ",
+        DbListPurpose::Move => " move to database (Enter: choose, /: search, Esc: cancel) ",
+    };
+
     let list = List::new(items)
         .block(
             Block::bordered()
                 .border_style(Style::default().fg(COLOR_TWO))
-                .title(" databases (Enter: switch, C: create new, Esc: back) ")
+                .title(title)
                 .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR)),
         )
         .highlight_style(Style::new().bg(COLOR_TWO).fg(FG_COLOR))
@@ -739,7 +789,31 @@ fn render_database_list_view(model: &mut Model, frame: &mut Frame) {
 
     frame.render_stateful_widget(list, layout[1], &mut model.db_list_state);
 
-    render_status_line(model, frame, layout[2]);
+    if search {
+        render_database_search_input(model, frame, layout[2]);
+        render_status_line(model, frame, layout[3]);
+    } else {
+        render_status_line(model, frame, layout[2]);
+    }
+}
+
+fn render_database_search_input(model: &Model, frame: &mut Frame, chunk: Rect) {
+    // keep 2 for borders and 1 for cursor
+    let width = chunk.width.max(3) - 3;
+    let scroll = model.db_search_input.visual_scroll(width as usize);
+
+    let input = Paragraph::new(model.db_search_input.value())
+        .style(Style::default().fg(COLOR_TWO))
+        .scroll((0, scroll as u16))
+        .block(
+            Block::bordered()
+                .title(" search databases? ")
+                .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR)),
+        );
+    frame.render_widget(input, chunk);
+
+    let cursor_x = model.db_search_input.visual_cursor().max(scroll) - scroll + 1;
+    frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
 }
 
 fn render_new_database_name_view(model: &Model, frame: &mut Frame) {
@@ -817,21 +891,54 @@ fn render_help_view(model: &mut Model, frame: &mut Frame) {
         .direction(ratatui::layout::Direction::Vertical)
         .constraints(vec![
             Constraint::Length(2),
-            Constraint::Min(21),
+            Constraint::Length(1),
+            Constraint::Min(10),
             Constraint::Length(1),
         ])
         .split(frame.area());
 
     render_header(model, frame, layout[0]);
-    let lines: Vec<Line<'_>> = HELP_CONTENTS.lines().map(Line::from).collect();
 
-    let p = Paragraph::new(lines)
-        .block(Block::new().padding(Padding::new(2, 0, 1, 0)))
-        .style(Style::new().white())
-        .alignment(Alignment::Left);
+    let hint = Line::from(vec![Span::styled(
+        "  Scroll: j/k or ↓/↑    Jump: g/G    Close: Esc, q, or ?",
+        Style::new().fg(HELP_COLOR),
+    )]);
+    frame.render_widget(Paragraph::new(hint), layout[1]);
 
-    frame.render_widget(p, layout[1]);
-    render_status_line(model, frame, layout[2]);
+    // Build one big Table: each section becomes a heading row (styled,
+    // second column left blank) followed by its key/description rows.
+    // Doing it as a single Table (rather than one per section) means a
+    // single TableState drives scrolling across the whole thing, the same
+    // way ListState drives scrolling in every other view.
+    let mut rows: Vec<Row<'_>> = Vec::with_capacity(HELP_SECTIONS.len() * 8);
+
+    for (section_index, section) in HELP_SECTIONS.iter().enumerate() {
+        let heading = Row::new([
+            Cell::new(section.title).style(Style::new().fg(HELP_COLOR).bold()),
+            Cell::new(""),
+        ])
+        .top_margin(if section_index == 0 { 0 } else { 1 });
+        rows.push(heading);
+
+        for help_row in section.rows {
+            let line_count = help_row.description.matches('\n').count() as u16 + 1;
+            rows.push(
+                Row::new([
+                    Cell::new(help_row.key).style(Style::new().fg(PRIMARY_COLOR).bold()),
+                    Cell::new(help_row.description).style(Style::new().white()),
+                ])
+                .height(line_count),
+            );
+        }
+    }
+
+    let widths = [Constraint::Length(20), Constraint::Min(30)];
+    let table = Table::new(rows, widths)
+        .block(Block::new().padding(Padding::new(2, 1, 1, 0)))
+        .column_spacing(2);
+
+    frame.render_stateful_widget(table, layout[2], &mut model.help_table_state);
+    render_status_line(model, frame, layout[3]);
 }
 
 fn render_mode_switcher_view(model: &mut Model, frame: &mut Frame) {

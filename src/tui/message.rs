@@ -1,4 +1,4 @@
-use super::common::ActivePane;
+use super::common::{ActivePane, DbListPurpose};
 use super::model::Model;
 use crate::domain::{SavedBookmark, TagStats};
 use crate::persistence::DBError;
@@ -45,10 +45,18 @@ pub enum Message {
     NewDatabaseNameGotEvent(Event),
     RequestCreateDatabase,
     DatabaseSwitched(Result<(Pool<Sqlite>, String), String>),
+    DatabaseSearchInputGotEvent(Event),
+    SubmitDatabaseSearch,
+    CancelDatabaseSearch,
+    ToggleNoteSearch,
+    RequestMoveSelectedBookmark,
+    RequestMoveMarkedBookmarks,
+    ToggleMarkForMove,
+    BookmarksMoved(Result<(usize, String), String>),
     ShowGlobalSearch,
     GlobalSearchFinished(Vec<(String, String, SavedBookmark)>, Vec<String>),
     RequestDeleteBookmark,
-    BookmarkDeleted(Result<u64, DBError>),
+    BookmarkDeleted(String, Result<u64, DBError>),
     StartEditBookmark(bool),
     EditFieldGotEvent(Event),
     EditFieldNext,
@@ -59,6 +67,7 @@ pub enum Message {
     StartNoteEdit,
     RequestDeleteNote,
     NoteFetched(String, Result<Option<String>, DBError>),
+    NoteExistenceFetched(String, Result<bool, DBError>),
     NoteInputGotEvent(Event),
     RequestSaveNote,
     RequestExitNote,
@@ -112,6 +121,16 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         };
                     }
 
+                    // Alt+n toggles "note search mode" from anywhere, same
+                    // as Alt+m above - plain 'n' (no Alt) still means "add/
+                    // edit note for the bookmark under cursor" in the List
+                    // view, so this has to be checked first.
+                    if key_event.modifiers.contains(KeyModifiers::ALT)
+                        && key_event.code == KeyCode::Char('n')
+                    {
+                        return Some(Message::ToggleNoteSearch);
+                    }
+
                     match model.active_pane {
                     ActivePane::List => match key_event.code {
                         KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
@@ -137,6 +156,9 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('E') => Some(Message::StartEditBookmark(true)),
                         KeyCode::Char('n') => Some(Message::StartNoteEdit),
                         KeyCode::Char('N') => Some(Message::RequestDeleteNote),
+                        KeyCode::Char(' ') => Some(Message::ToggleMarkForMove),
+                        KeyCode::Char('m') => Some(Message::RequestMoveSelectedBookmark),
+                        KeyCode::Char('M') => Some(Message::RequestMoveMarkedBookmarks),
                         KeyCode::Delete => Some(Message::RequestDeleteBookmark),
                         KeyCode::Char('y')
                             if key_event.modifiers.contains(KeyModifiers::SHIFT) =>
@@ -150,6 +172,10 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         _ => None,
                     },
                     ActivePane::Help => match key_event.code {
+                        KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
+                        KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
+                        KeyCode::Char('g') => Some(Message::GoToFirstListItem),
+                        KeyCode::Char('G') => Some(Message::GoToLastListItem),
                         KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
                         KeyCode::Char('?') => Some(Message::ShowView(ActivePane::List)),
                         _ => None,
@@ -203,10 +229,25 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
                         KeyCode::Char('g') => Some(Message::GoToFirstListItem),
                         KeyCode::Char('G') => Some(Message::GoToLastListItem),
+                        KeyCode::Char('/') => {
+                            Some(Message::ShowView(ActivePane::DatabaseSearchInput))
+                        }
                         KeyCode::Enter => Some(Message::RequestSwitchDatabase),
-                        KeyCode::Char('C') => Some(Message::StartNewDatabaseName),
+                        // creating a new database only makes sense while
+                        // switching the active database, not while picking
+                        // a destination to move bookmark(s) into
+                        KeyCode::Char('C') if model.db_list_purpose == DbListPurpose::Switch => {
+                            Some(Message::StartNewDatabaseName)
+                        }
                         KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
                         _ => None,
+                    },
+                    ActivePane::DatabaseSearchInput => match key_event.code {
+                        KeyCode::Esc => Some(Message::CancelDatabaseSearch),
+                        KeyCode::Enter => Some(Message::SubmitDatabaseSearch),
+                        KeyCode::Down => Some(Message::GoToNextListItem),
+                        KeyCode::Up => Some(Message::GoToPreviousListItem),
+                        _ => Some(Message::DatabaseSearchInputGotEvent(event)),
                     },
                     ActivePane::NewDatabaseName => match key_event.code {
                         KeyCode::Esc => Some(Message::GoBackOrQuit),

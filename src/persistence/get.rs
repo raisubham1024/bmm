@@ -554,6 +554,74 @@ LIMIT
     })
 }
 
+/// Fetches bookmarks that have a note attached, optionally narrowed down
+/// to only those whose note text matches every given search term (this is
+/// "note search" mode in the TUI, Alt+n) - unlike `get_bookmarks_by_query`,
+/// this only ever matches against the note content, not the uri/title/tags.
+/// `search_terms: None` (or an empty query) returns every bookmark that
+/// has a non-empty note.
+pub async fn get_bookmarks_with_notes(
+    pool: &Pool<Sqlite>,
+    search_terms: Option<&SearchTerms>,
+    limit: u16,
+) -> Result<Vec<SavedBookmark>, DBError> {
+    let has_terms = search_terms.is_some_and(|terms| terms.iter().next().is_some());
+
+    let extra_conditions = match search_terms {
+        Some(terms) if has_terms => terms
+            .iter()
+            .map(|_| " AND b.notes LIKE ?".to_string())
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    };
+
+    let query = format!(
+        r#"
+SELECT
+    b.uri,
+    b.title,
+    GROUP_CONCAT(
+        t.name,
+        ','
+        ORDER BY
+            t.name ASC
+    ) AS tags
+FROM
+    bookmarks b
+    LEFT JOIN bookmark_tags bt ON b.id = bt.bookmark_id
+    LEFT JOIN tags t ON bt.tag_id = t.id
+WHERE
+    b.notes IS NOT NULL
+    AND TRIM(b.notes) != ''
+    {extra_conditions}
+GROUP BY
+    b.id,
+    b.uri,
+    b.title,
+    b.updated_at
+ORDER BY
+    b.updated_at DESC
+LIMIT
+    ?
+"#
+    );
+
+    let mut query_builder = sqlx::query_as::<_, SavedBookmark>(&query);
+
+    if has_terms {
+        for term in search_terms.unwrap().iter() {
+            query_builder = query_builder.bind(format!("%{term}%"));
+        }
+    }
+
+    query_builder = query_builder.bind(limit);
+
+    query_builder.fetch_all(pool).await.map_err(|e| {
+        DBError::CouldntExecuteQuery("get bookmarks with notes matching query".into(), e)
+    })
+}
+
 #[allow(unused)]
 pub(super) async fn get_num_bookmarks(pool: &Pool<Sqlite>) -> Result<i64, DBError> {
     sqlx::query_scalar!(

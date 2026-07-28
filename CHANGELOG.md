@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Help view (`?`) has been rewritten as a set of scrollable tables, one
+  per view/heading, instead of a single block of plain text. It now also
+  documents every shortcut that exists in the app, including the ones that
+  were previously missing from it (`g`/`G`, `Tab` as an alias for `t`, and
+  arrow-key navigation while typing in the various search inputs). Scroll it
+  with `j`/`k`/arrows, jump to the top/bottom with `g`/`G`.
 - `Alt+m` opens a mode switcher overlay, from any view, listing every mode
   (all bookmarks, search, tags, duplicates, starred, global search,
   databases, help). Navigate with `j`/`k`/arrows, `Enter` jumps to the

@@ -347,8 +347,13 @@ browser, since Android has no generic "open incognito" mechanism.
 
 ### TUI Reference Manual
 
+The same reference below is also built into the TUI itself: press `?` from
+the Bookmarks List View to open the Help view, which shows every view and
+every shortcut as scrollable tables (use `j`/`k`, the arrow keys, or `g`/`G`
+to move around, and `Esc`, `q`, or `?` again to close it).
+
 ```text
-bmm has eight views.
+bmm has nine views.
 
 - Bookmarks List View
 - Tags List View
@@ -357,22 +362,35 @@ bmm has eight views.
 - Database List View
 - New Database Name View
 - Confirm View
+- Mode Switcher View
 - Help View (this one)
 
 Keymaps
 ---
 
-General
-    ?                    show/hide help view
-    Esc / q              go back/reset input/exit
+General (works in every view)
+    ?                    open/close the Help view
+    Alt+m                open the Mode Switcher (jump straight to any view:
+                         all bookmarks, search, tags, duplicates, starred,
+                         search across all databases, note search,
+                         databases, help) - works from anywhere, even while
+                         typing. Press it again (or Esc/q) to close it.
+    Alt+n                turn "note search" on/off (only shows bookmarks
+                         that have a note, and searches inside the note
+                         text) - works from anywhere, even while typing
+    Esc / q              go back a step / clear the current input / exit
     j / Down             go down in a list
     k / Up               go up in a list
+    g                    jump to the first item in a list
+    G                    jump to the last item in a list
 
 Bookmarks List View
-    s                    show search input
-    Enter                submit search query (leave empty + Enter to show all bookmarks)
+    s                    show search input (results update live as you type,
+                         no need to press Enter)
+    Enter                confirm search query and close the search input
+                         (leave empty + Enter to show all bookmarks)
     a                    add a new bookmark (URI, title, tags)
-    t                    show Tags List View (when search is not active)
+    t / Tab              show Tags List View (when search is not active)
     d                    show bookmarks that have a duplicate title
     e                    edit the title/tags of the bookmark under cursor
     E                    edit the URI (as well as title/tags) of the bookmark
@@ -385,6 +403,13 @@ Bookmarks List View
     A                    show/switch between databases
     z                    search across all databases at once (results show
                          which database each bookmark is from)
+    Space                mark/unmark the bookmark under cursor for a bulk
+                         move to another database (see "M" below)
+    m                    move the bookmark under cursor to another database
+                         (asks for confirmation)
+    M                    move all marked bookmarks to another database
+                         (asks for confirmation) - mark bookmarks first
+                         with Space
     Delete / D           delete the bookmark under cursor (asks for
                          confirmation)
     o                    open URI in browser
@@ -395,9 +420,20 @@ Bookmarks List View
     y                    copy URI under cursor to system clipboard
     Y                    copy all URIs to system clipboard
 
+Search Input (opened with "s")
+    Enter                confirm the search text and close the box (leave
+                         it empty + Enter to show all bookmarks)
+    Esc                  cancel and close the search box
+    Down / Up            move the highlighted bookmark while still typing
+
 Tags List View
     /                    show tag search input
     Enter                show bookmarks that are tagged with the one under cursor
+
+Tag Search Input (opened with "/")
+    Enter                confirm the filter and go back to the tag list
+    Esc                  cancel and go back to the tag list
+    Down / Up            move the highlighted tag while still typing
 
 Edit Bookmark View
     Tab / Down           move to the next field
@@ -413,17 +449,37 @@ Notes View
 
 Database List View
     Enter                switch to the database under cursor for this
-                         session (resets to bmm.db next time you start bmm)
-    C                    create a new database
+                         session (resets to bmm.db next time you start bmm) -
+                         or, if you got here via "m"/"M", move the queued
+                         bookmark(s) into the database under cursor instead
+    /                    show database search input, to filter the list by name
+    C                    create a new database (only available when
+                         switching databases, not while moving bookmarks)
     Esc                  go back
+
+Database Search Input (opened with "/")
+    Enter                confirm the filter and go back to the database list
+    Esc                  cancel and go back to the bookmarks list
+    Down / Up            move the highlighted database while still typing
 
 New Database Name View
     Enter / Ctrl+s       create the database and switch to it
     Esc                  cancel
 
+Mode Switcher View (opened with Alt+m)
+    j / k / Down / Up    move selection
+    g / G                jump to the first/last option
+    Enter                jump to the selected view
+    Alt+m / Esc / q      close without switching
+
 Confirm View
     y                    confirm
     n / Esc              cancel
+
+Help View (this one)
+    j / k / Down / Up    scroll the list
+    g / G                jump to the top/bottom
+    Esc / q / ?          close and go back
 ```
 
 🔐 Verifying release artifacts

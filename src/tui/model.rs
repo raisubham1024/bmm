@@ -6,7 +6,7 @@ use crate::{
 use ratatui::{
     style::Style,
     text::Line,
-    widgets::{ListItem, ListState},
+    widgets::{ListItem, ListState, TableState},
 };
 use sqlx::{Pool, Sqlite};
 use std::collections::HashSet;
@@ -31,18 +31,20 @@ pub(super) enum ModeOption {
     Duplicates,
     Starred,
     GlobalSearch,
+    NoteSearch,
     Databases,
     Help,
 }
 
 impl ModeOption {
-    pub(super) const ALL: [ModeOption; 8] = [
+    pub(super) const ALL: [ModeOption; 9] = [
         ModeOption::AllBookmarks,
         ModeOption::Search,
         ModeOption::Tags,
         ModeOption::Duplicates,
         ModeOption::Starred,
         ModeOption::GlobalSearch,
+        ModeOption::NoteSearch,
         ModeOption::Databases,
         ModeOption::Help,
     ];
@@ -55,6 +57,7 @@ impl ModeOption {
             ModeOption::Duplicates => "duplicate bookmarks",
             ModeOption::Starred => "starred bookmarks",
             ModeOption::GlobalSearch => "search across all databases",
+            ModeOption::NoteSearch => "search notes",
             ModeOption::Databases => "switch database",
             ModeOption::Help => "help",
         }
@@ -68,6 +71,7 @@ impl ModeOption {
             ModeOption::Duplicates => "d",
             ModeOption::Starred => "S",
             ModeOption::GlobalSearch => "z",
+            ModeOption::NoteSearch => "Alt+n",
             ModeOption::Databases => "A",
             ModeOption::Help => "?",
         }
@@ -81,6 +85,7 @@ impl ModeOption {
             ModeOption::Duplicates => Message::ShowDuplicates,
             ModeOption::Starred => Message::ShowStarred,
             ModeOption::GlobalSearch => Message::ShowGlobalSearch,
+            ModeOption::NoteSearch => Message::ToggleNoteSearch,
             ModeOption::Databases => Message::ShowDatabaseList,
             ModeOption::Help => Message::ShowView(ActivePane::Help),
         }
@@ -93,6 +98,14 @@ pub(crate) struct BookmarkItem {
     pub(crate) status: bool,
     pub(crate) starred: bool,
     pub(crate) source_db: Option<(String, String)>,
+    /// Whether this bookmark has a note attached. `None` means it hasn't
+    /// been checked yet - fetched lazily (only for the selected item, one
+    /// bookmark at a time) rather than upfront for the whole list, to keep
+    /// list loads cheap.
+    pub(crate) has_note: Option<bool>,
+    /// Whether this bookmark is marked for a bulk "move to another
+    /// database" operation (toggled with Space, acted on with `M`).
+    pub(crate) marked: bool,
 }
 
 #[derive(Debug)]
@@ -218,6 +231,8 @@ impl BookmarkItem {
             status,
             starred: false,
             source_db: None,
+            has_note: None,
+            marked: false,
         }
     }
 
@@ -227,12 +242,15 @@ impl BookmarkItem {
             status: false,
             starred: false,
             source_db: Some((name, path)),
+            has_note: None,
+            marked: false,
         }
     }
 }
 
 impl From<&BookmarkItem> for ListItem<'_> {
     fn from(value: &BookmarkItem) -> Self {
+        let mark_prefix = if value.marked { "[x] " } else { "" };
         let star_prefix = if value.starred { "\u{2605} " } else { "" };
         let db_suffix = match &value.source_db {
             Some((name, _)) => format!("  [{name}]"),
@@ -240,11 +258,14 @@ impl From<&BookmarkItem> for ListItem<'_> {
         };
         let line = match value.status {
             false => Line::from(format!(
-                "{star_prefix}{}{db_suffix}",
+                "{mark_prefix}{star_prefix}{}{db_suffix}",
                 value.bookmark.uri
             )),
             true => Line::styled(
-                format!("> {star_prefix}{}{db_suffix}", value.bookmark.uri),
+                format!(
+                    "> {mark_prefix}{star_prefix}{}{db_suffix}",
+                    value.bookmark.uri
+                ),
                 Style::new().fg(COLOR_TWO),
             ),
         };
@@ -268,6 +289,12 @@ pub(super) enum PendingConfirmation {
     DiscardNote,
     DeleteNote(String),
     TooManyLinksWarning(usize),
+    MoveBookmarks {
+        items: Vec<(String, Option<String>)>,
+        target_db_path: String,
+        target_display_name: String,
+        skipped: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -313,11 +340,33 @@ pub(super) struct Model {
     pub(super) showing_starred: bool,
     pub(super) active_db_name: String,
     pub(super) available_dbs: Vec<String>,
+    /// The subset of `available_dbs` currently shown/selectable in the
+    /// Database List view - equal to `available_dbs` unless a database
+    /// search (`/`) is narrowing it down.
+    pub(super) filtered_dbs: Vec<String>,
     pub(super) db_list_state: ListState,
+    pub(super) db_search_input: Input,
+    /// Whether the database list is currently being used to switch the
+    /// active database, or to pick a destination for a bookmark move.
+    pub(super) db_list_purpose: DbListPurpose,
     pub(super) new_db_name_input: Input,
     pub(super) global_search_mode: bool,
+    pub(super) note_search_mode: bool,
     pub(super) mode_switcher_state: ListState,
     pub(super) pane_before_mode_switch: ActivePane,
+    /// Bookmarks marked (Space) for a bulk move-to-database operation (`M`).
+    pub(super) marked_uris: HashSet<String>,
+    /// The bookmark(s) queued for the move currently in progress (picked
+    /// via `m`/`M`), paired with the path of the database they currently
+    /// live in (`None` means the active database).
+    pub(super) move_pending: Vec<(String, Option<String>)>,
+    /// Uris of the move that was just confirmed and sent off as a command -
+    /// used to remove them from the list locally once the move succeeds.
+    pub(super) move_last_uris: Vec<String>,
+    /// Scroll/selection state for the Help view's tables - reused purely
+    /// for scrolling (nothing is ever visibly "selected"), the same way
+    /// `ListState` is used to scroll the other list-based views.
+    pub(super) help_table_state: TableState,
 }
 
 impl Model {
@@ -377,11 +426,19 @@ impl Model {
             showing_starred: false,
             active_db_name: db_name,
             available_dbs: vec![],
+            filtered_dbs: vec![],
             db_list_state: ListState::default(),
+            db_search_input: Input::default(),
+            db_list_purpose: DbListPurpose::Switch,
             new_db_name_input: Input::default(),
             global_search_mode: false,
+            note_search_mode: false,
             mode_switcher_state: ListState::default(),
             pane_before_mode_switch: active_pane,
+            marked_uris: HashSet::new(),
+            move_pending: vec![],
+            move_last_uris: vec![],
+            help_table_state: TableState::default(),
         }
     }
 
@@ -391,14 +448,16 @@ impl Model {
             ActivePane::TagsList | ActivePane::TagSearchInput => {
                 self.tag_items.state.select_next()
             }
-            ActivePane::DatabaseList => self.db_list_state.select_next(),
+            ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
+                self.db_list_state.select_next()
+            }
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_next(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
             ActivePane::NewDatabaseName => {}
             ActivePane::Confirm => {}
-            ActivePane::Help => {}
+            ActivePane::Help => self.help_table_state.select_next(),
         }
     }
 
@@ -408,14 +467,16 @@ impl Model {
             ActivePane::TagsList | ActivePane::TagSearchInput => {
                 self.tag_items.state.select_previous()
             }
-            ActivePane::DatabaseList => self.db_list_state.select_previous(),
+            ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
+                self.db_list_state.select_previous()
+            }
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_previous(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
             ActivePane::NewDatabaseName => {}
             ActivePane::Confirm => {}
-            ActivePane::Help => {}
+            ActivePane::Help => self.help_table_state.select_previous(),
         }
     }
 
@@ -425,14 +486,16 @@ impl Model {
             ActivePane::TagsList | ActivePane::TagSearchInput => {
                 self.tag_items.state.select_first()
             }
-            ActivePane::DatabaseList => self.db_list_state.select_first(),
+            ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
+                self.db_list_state.select_first()
+            }
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_first(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
             ActivePane::NewDatabaseName => {}
             ActivePane::Confirm => {}
-            ActivePane::Help => {}
+            ActivePane::Help => self.help_table_state.select_first(),
         }
     }
     pub(super) fn select_last_list_item(&mut self) {
@@ -441,14 +504,16 @@ impl Model {
             ActivePane::TagsList | ActivePane::TagSearchInput => {
                 self.tag_items.state.select_last()
             }
-            ActivePane::DatabaseList => self.db_list_state.select_last(),
+            ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
+                self.db_list_state.select_last()
+            }
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_last(),
             ActivePane::SearchInput => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
             ActivePane::NewDatabaseName => {}
             ActivePane::Confirm => {}
-            ActivePane::Help => {}
+            ActivePane::Help => self.help_table_state.select_last(),
         }
     }
 
@@ -462,36 +527,49 @@ impl Model {
             ActivePane::EditBookmark => view,
             ActivePane::Notes => view,
             ActivePane::DatabaseList => view,
+            ActivePane::DatabaseSearchInput => view,
             ActivePane::NewDatabaseName => view,
             ActivePane::Confirm => view,
             ActivePane::ModeSwitcher => view,
         };
 
         match view {
-            ActivePane::Help => None,
+            ActivePane::Help => {
+                self.help_table_state = TableState::default();
+                None
+            }
             ActivePane::List => None,
             ActivePane::TagsList => {
-                if self.tag_items.items.is_empty() {
-                    Some(Command::FetchTags)
-                } else {
-                    None
-                }
+                // Always refetch, rather than only when the cached list is
+                // empty - otherwise deleting/editing/moving a bookmark
+                // (which can change tag counts, or make a tag disappear
+                // entirely) wouldn't be reflected here until the list
+                // happened to be empty again (e.g. after restarting bmm).
+                Some(Command::FetchTags)
             }
             ActivePane::TagSearchInput => None,
-            ActivePane::SearchInput => None,
+            ActivePane::SearchInput => {
+                // this is the plain "s" entry point into search - make sure
+                // no leftover global/note-search mode from a previous
+                // session carries over into what looks like a normal search
+                self.global_search_mode = false;
+                self.note_search_mode = false;
+                None
+            }
             ActivePane::EditBookmark => None,
             ActivePane::Notes => None,
             ActivePane::DatabaseList => None,
+            ActivePane::DatabaseSearchInput => None,
             ActivePane::NewDatabaseName => None,
             ActivePane::Confirm => None,
             ActivePane::ModeSwitcher => None,
         }
     }
 
-    pub(super) fn go_back_or_quit(&mut self) {
+    pub(super) fn go_back_or_quit(&mut self) -> Option<Command> {
         if self.terminal_too_small {
             self.running_state = RunningState::Done;
-            return;
+            return None;
         }
 
         match self.active_pane {
@@ -501,6 +579,20 @@ impl Model {
                 self.search_input.reset();
                 self.initial = false;
                 self.active_pane = ActivePane::List;
+
+                // Live search may have left the list showing filtered
+                // results from a query that was never confirmed with
+                // Enter - restore the unfiltered view on cancel, same
+                // as what an empty confirmed search would show.
+                let was_global = self.global_search_mode;
+                self.global_search_mode = false;
+                self.note_search_mode = false;
+
+                return Some(if was_global {
+                    Command::GlobalSearch(None)
+                } else {
+                    Command::FetchAllBookmarks
+                });
             }
             ActivePane::TagSearchInput => {
                 self.cancel_tag_search();
@@ -512,7 +604,12 @@ impl Model {
                 self.cancel_note_edit();
             }
             ActivePane::DatabaseList => {
+                self.move_pending.clear();
+                self.db_list_purpose = DbListPurpose::Switch;
                 self.active_pane = ActivePane::List;
+            }
+            ActivePane::DatabaseSearchInput => {
+                self.cancel_database_search();
             }
             ActivePane::NewDatabaseName => {
                 self.new_db_name_input.reset();
@@ -528,6 +625,59 @@ impl Model {
                 self.active_pane = self.pane_before_mode_switch;
             }
         };
+
+        None
+    }
+
+    /// Builds the command to re-run the search with whatever is currently
+    /// typed into the search box, so results update live as the user types
+    /// instead of waiting for Enter. Returns `None` when the current text
+    /// can't form a valid query yet (eg. too many terms) - in that case the
+    /// list just keeps showing its last valid results until the input
+    /// becomes valid again.
+    pub(super) fn live_search_command(&self) -> Option<Command> {
+        let query = self.search_input.value();
+
+        if query.trim().is_empty() {
+            return Some(if self.global_search_mode {
+                Command::GlobalSearch(None)
+            } else if self.note_search_mode {
+                Command::SearchNotes(None)
+            } else {
+                Command::FetchAllBookmarks
+            });
+        }
+
+        match SearchTerms::try_from(query) {
+            Ok(terms) => Some(if self.global_search_mode {
+                Command::GlobalSearch(Some(terms))
+            } else if self.note_search_mode {
+                Command::SearchNotes(Some(terms))
+            } else {
+                Command::SearchBookmarks(terms)
+            }),
+            Err(_) => None,
+        }
+    }
+
+    /// If a bookmark is selected in the List pane and we don't yet know
+    /// whether it has a note, builds the command to check - so the details
+    /// box can show a "Notes" line. Only ever checks one bookmark (the
+    /// selected one) at a time, and only once per bookmark, to keep this
+    /// cheap.
+    pub(super) fn maybe_fetch_note_existence_for_selected(&self) -> Option<Command> {
+        if self.active_pane != ActivePane::List {
+            return None;
+        }
+
+        let index = self.bookmark_items.state.selected()?;
+        let item = self.bookmark_items.items.get(index)?;
+
+        if item.has_note.is_some() {
+            return None;
+        }
+
+        Some(Command::FetchNoteExists(item.bookmark.uri.clone()))
     }
 
     pub(super) fn filter_tags(&mut self) {
@@ -866,12 +1016,13 @@ impl Model {
     //  starred bookmarks             //
     //-------------------------------//
 
-    /// Refreshes each visible item's star marker based on `starred_uris`.
-    /// Call this any time `bookmark_items` is (re)populated, or
-    /// `starred_uris` changes.
+    /// Refreshes each visible item's star/mark markers based on
+    /// `starred_uris`/`marked_uris`. Call this any time `bookmark_items` is
+    /// (re)populated, or either of those sets changes.
     pub(super) fn sync_starred_markers(&mut self) {
         for item in self.bookmark_items.items.iter_mut() {
             item.starred = self.starred_uris.contains(&item.bookmark.uri);
+            item.marked = self.marked_uris.contains(&item.bookmark.uri);
         }
     }
 
@@ -891,6 +1042,26 @@ impl Model {
             if self.showing_starred {
                 self.remove_bookmark_by_uri(uri);
             }
+        }
+
+        self.sync_starred_markers();
+    }
+
+    //-------------------------------//
+    //  marking bookmarks for move    //
+    //-------------------------------//
+
+    /// Toggles whether the bookmark under cursor in the List pane is
+    /// marked for a bulk move (`M`).
+    pub(super) fn toggle_mark_for_move(&mut self) {
+        let Some(uri) = self.get_selected_bookmark_uri() else {
+            return;
+        };
+
+        if self.marked_uris.contains(&uri) {
+            self.marked_uris.remove(&uri);
+        } else {
+            self.marked_uris.insert(uri);
         }
 
         self.sync_starred_markers();
@@ -928,13 +1099,16 @@ impl Model {
 
         dbs.sort();
         self.available_dbs = dbs;
+        self.filtered_dbs = self.available_dbs.clone();
     }
 
-    pub(super) fn show_database_list(&mut self) {
+    fn show_database_list_for(&mut self, purpose: DbListPurpose) {
         self.scan_available_databases();
+        self.db_search_input.reset();
+        self.db_list_purpose = purpose;
 
         let selected_index = self
-            .available_dbs
+            .filtered_dbs
             .iter()
             .position(|d| d == &self.active_db_name)
             .unwrap_or(0);
@@ -943,11 +1117,50 @@ impl Model {
         self.active_pane = ActivePane::DatabaseList;
     }
 
+    pub(super) fn show_database_list(&mut self) {
+        self.show_database_list_for(DbListPurpose::Switch);
+    }
+
+    /// Filters `available_dbs` by whatever's typed into `db_search_input`,
+    /// storing the result in `filtered_dbs` - mirrors `filter_tags`.
+    pub(super) fn filter_databases(&mut self) {
+        let query = self.db_search_input.value().trim().to_lowercase();
+
+        self.filtered_dbs = if query.is_empty() {
+            self.available_dbs.clone()
+        } else {
+            self.available_dbs
+                .iter()
+                .filter(|d| d.to_lowercase().contains(&query))
+                .cloned()
+                .collect()
+        };
+
+        self.db_list_state
+            .select(if self.filtered_dbs.is_empty() {
+                None
+            } else {
+                Some(0)
+            });
+    }
+
+    pub(super) fn cancel_database_search(&mut self) {
+        self.db_search_input.reset();
+        self.filtered_dbs = self.available_dbs.clone();
+        self.move_pending.clear();
+        self.db_list_purpose = DbListPurpose::Switch;
+        self.active_pane = ActivePane::List;
+    }
+
+    pub(super) fn confirm_database_search(&mut self) {
+        self.active_pane = ActivePane::DatabaseList;
+    }
+
     pub(super) fn request_switch_to_selected_database(&mut self) -> Option<Command> {
         let name = self
             .db_list_state
             .selected()
-            .and_then(|i| self.available_dbs.get(i))?
+            .and_then(|i| self.filtered_dbs.get(i))?
             .clone();
 
         if name == self.active_db_name {
@@ -964,6 +1177,142 @@ impl Model {
             path,
             display_name: name,
         })
+    }
+
+    //-------------------------------//
+    //  moving bookmark(s) to another //
+    //  database ('m' / 'M')          //
+    //-------------------------------//
+
+    /// Queues the bookmark under cursor for a move, and opens the database
+    /// picker to choose its destination.
+    pub(super) fn start_move_selected_bookmark(&mut self) {
+        if self.active_pane != ActivePane::List {
+            return;
+        }
+
+        let Some(index) = self.bookmark_items.state.selected() else {
+            return;
+        };
+        let Some(item) = self.bookmark_items.items.get(index) else {
+            return;
+        };
+
+        let uri = item.bookmark.uri.clone();
+        let source_db_path = item.source_db.as_ref().map(|(_, path)| path.clone());
+
+        self.move_pending = vec![(uri, source_db_path)];
+        self.show_database_list_for(DbListPurpose::Move);
+    }
+
+    /// Queues every marked bookmark for a move, and opens the database
+    /// picker to choose their destination. Shows an info message instead
+    /// if nothing is currently marked.
+    pub(super) fn start_move_marked_bookmarks(&mut self) {
+        if self.active_pane != ActivePane::List {
+            return;
+        }
+
+        if self.marked_uris.is_empty() {
+            self.user_message = Some(
+                UserMessage::info("no bookmarks marked - press space to mark bookmarks first")
+                    .with_frames_left(2),
+            );
+            return;
+        }
+
+        let items: Vec<(String, Option<String>)> = self
+            .bookmark_items
+            .items
+            .iter()
+            .filter(|item| self.marked_uris.contains(&item.bookmark.uri))
+            .map(|item| {
+                (
+                    item.bookmark.uri.clone(),
+                    item.source_db.as_ref().map(|(_, path)| path.clone()),
+                )
+            })
+            .collect();
+
+        if items.is_empty() {
+            self.user_message = Some(
+                UserMessage::info("marked bookmarks aren't in the current list")
+                    .with_frames_left(2),
+            );
+            return;
+        }
+
+        self.move_pending = items;
+        self.show_database_list_for(DbListPurpose::Move);
+    }
+
+    /// Builds the confirmation prompt for the database currently selected
+    /// in the picker, skipping any queued bookmark(s) that are already in
+    /// that database. Sets up `pending_confirmation` rather than returning
+    /// a `Command` directly, since moving is destructive enough to warrant
+    /// asking first (same as delete).
+    pub(super) fn request_move_to_selected_database(&mut self) {
+        let Some(name) = self
+            .db_list_state
+            .selected()
+            .and_then(|i| self.filtered_dbs.get(i))
+            .cloned()
+        else {
+            return;
+        };
+
+        let Some(data_dir) = crate::utils::get_data_dir().ok() else {
+            self.user_message = Some(UserMessage::error("couldn't determine data directory"));
+            return;
+        };
+        let target_path = data_dir.join("bmm").join(&name);
+        let Some(target_path) = target_path.to_str().map(|s| s.to_string()) else {
+            self.user_message = Some(UserMessage::error("invalid database path"));
+            return;
+        };
+
+        let mut skipped = 0usize;
+        let items: Vec<(String, Option<String>)> = self
+            .move_pending
+            .iter()
+            .filter(|(_, source_db_path)| {
+                let already_there = match source_db_path {
+                    Some(path) => path == &target_path,
+                    None => name == self.active_db_name,
+                };
+                if already_there {
+                    skipped += 1;
+                }
+                !already_there
+            })
+            .cloned()
+            .collect();
+
+        if items.is_empty() {
+            self.user_message = Some(UserMessage::error("already in this database"));
+            return;
+        }
+
+        self.pending_confirmation = Some(PendingConfirmation::MoveBookmarks {
+            items,
+            target_db_path: target_path,
+            target_display_name: name,
+            skipped,
+        });
+        self.pane_before_confirm = ActivePane::DatabaseList;
+        self.active_pane = ActivePane::Confirm;
+    }
+
+    /// Called after a move succeeds: drops the moved bookmarks from the
+    /// current list/marks and resets the move-in-progress state.
+    pub(super) fn apply_bookmarks_moved(&mut self) {
+        for uri in std::mem::take(&mut self.move_last_uris) {
+            self.remove_bookmark_by_uri(&uri);
+            self.marked_uris.remove(&uri);
+        }
+        self.move_pending.clear();
+        self.db_list_purpose = DbListPurpose::Switch;
+        self.sync_starred_markers();
     }
 
     pub(super) fn start_new_database_name(&mut self) {
@@ -1010,6 +1359,8 @@ impl Model {
         self.starred_uris = HashSet::new();
         self.showing_starred = false;
         self.viewing_duplicates = false;
+        self.marked_uris = HashSet::new();
+        self.move_pending = vec![];
     }
 
     pub(super) fn confirm_message(&self) -> String {
@@ -1048,6 +1399,22 @@ impl Model {
                 format!(
                     "Total links are {count}, which is more than {MAX_BULK_OPEN_LINKS}.\nOpening this many links at once could cause problems with your browser.\n\nPlease narrow your search/results and try again."
                 )
+            }
+            Some(PendingConfirmation::MoveBookmarks {
+                items,
+                target_display_name,
+                skipped,
+                ..
+            }) => {
+                let n = items.len();
+                let word = if n == 1 { "bookmark" } else { "bookmarks" };
+                if *skipped > 0 {
+                    format!(
+                        "move {n} {word} to \"{target_display_name}\"?\n\n({skipped} already there and will be skipped)"
+                    )
+                } else {
+                    format!("move {n} {word} to \"{target_display_name}\"?")
+                }
             }
             None => String::new(),
         }

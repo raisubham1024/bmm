@@ -2,6 +2,7 @@ mod app;
 mod commands;
 mod common;
 mod handle;
+mod help_content;
 mod message;
 mod model;
 mod update;
