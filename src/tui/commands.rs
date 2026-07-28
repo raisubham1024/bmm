@@ -42,4 +42,6 @@ pub(super) enum Command {
         target_display_name: String,
     },
     CopyContentToClipboard(String),
+    BackupDatabases,
+    RestoreDatabases,
 }

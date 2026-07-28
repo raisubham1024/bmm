@@ -1,4 +1,5 @@
 mod app;
+mod backup;
 mod commands;
 mod common;
 mod handle;

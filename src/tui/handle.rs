@@ -384,6 +384,18 @@ pub(super) async fn handle_command(
                 let _ = event_tx.try_send(Message::ContentCopiedToClipboard(result));
             });
         }
+        Command::BackupDatabases => {
+            tokio::task::spawn_blocking(move || {
+                let result = super::backup::backup_databases();
+                let _ = event_tx.try_send(Message::DatabasesBackedUp(result));
+            });
+        }
+        Command::RestoreDatabases => {
+            tokio::task::spawn_blocking(move || {
+                let result = super::backup::restore_databases();
+                let _ = event_tx.try_send(Message::DatabasesRestored(result));
+            });
+        }
     }
 }
 

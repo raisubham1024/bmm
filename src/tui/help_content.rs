@@ -97,6 +97,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
                 "Clipboard",
                 "Copy a single link, or every listed\nlink, straight to your system\nclipboard (\"y\", \"Y\")."
             ),
+            row!(
+                "Backup / restore",
+                "Back up every local database to a\nplain folder outside bmm (Alt+b), and\nbring them back in later or on\nanother device (Alt+g). The folder\nis: Android - ~/sdcard/Download/links,\nWindows - C:\\links, Linux/macOS -\n~/Download/links."
+            ),
         ],
     },
     HelpSection {
@@ -169,6 +173,14 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             row!(
                 "Alt+n",
                 "Turn \"note search\" on or off - only\nshows bookmarks that have a note, and\nsearches inside the note text. Works\nfrom anywhere, even while you're\ntyping."
+            ),
+            row!(
+                "Alt+g",
+                "Restore every database found in the\nbackup/\"links\" folder into bmm's data\ndirectory, overwriting any with the\nsame name (see \"Backup / restore\"\nunder Core Features above). Works\nfrom anywhere, even while typing."
+            ),
+            row!(
+                "Alt+b",
+                "Back up every local database to the\nbackup/\"links\" folder - the reverse\nof Alt+g above. Works from anywhere,\neven while typing."
             ),
             row!(
                 "Esc / q",

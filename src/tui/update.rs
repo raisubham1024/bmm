@@ -8,6 +8,44 @@ use tui_input::backend::crossterm::EventHandler;
 pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
     let mut cmds = Vec::new();
     match msg {
+        Message::RequestBackupDatabases => {
+            cmds.push(Command::BackupDatabases);
+        }
+        Message::DatabasesBackedUp(result) => match result {
+            Ok((count, dest)) => {
+                let msg = if count == 1 {
+                    format!("backed up 1 database to {}", dest.display())
+                } else {
+                    format!("backed up {count} databases to {}", dest.display())
+                };
+                model.user_message = Some(UserMessage::info(&msg).with_frames_left(4));
+            }
+            Err(e) => {
+                model.user_message = Some(UserMessage::error(&format!("backup failed: {e}")));
+            }
+        },
+        Message::RequestRestoreDatabases => {
+            cmds.push(Command::RestoreDatabases);
+        }
+        Message::DatabasesRestored(result) => match result {
+            Ok((count, src)) => {
+                let msg = if count == 1 {
+                    format!(
+                        "restored 1 database from {} - restart bmm to fully pick it up",
+                        src.display()
+                    )
+                } else {
+                    format!(
+                        "restored {count} databases from {} - restart bmm to fully pick them up",
+                        src.display()
+                    )
+                };
+                model.user_message = Some(UserMessage::info(&msg).with_frames_left(6));
+            }
+            Err(e) => {
+                model.user_message = Some(UserMessage::error(&format!("restore failed: {e}")));
+            }
+        },
         Message::GoToNextListItem => model.select_next_list_item(),
         Message::GoToPreviousListItem => model.select_previous_list_item(),
         Message::OpenInBrowser => {

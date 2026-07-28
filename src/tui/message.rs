@@ -79,6 +79,10 @@ pub enum Message {
     ToggleModeSwitcher,
     ConfirmModeSelection,
     ShowAllBookmarks,
+    RequestBackupDatabases,
+    DatabasesBackedUp(Result<(usize, std::path::PathBuf), String>),
+    RequestRestoreDatabases,
+    DatabasesRestored(Result<(usize, std::path::PathBuf), String>),
 }
 
 pub enum UrlsOpenedResult {
@@ -129,6 +133,27 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         && key_event.code == KeyCode::Char('n')
                     {
                         return Some(Message::ToggleNoteSearch);
+                    }
+
+                    // Alt+g restores every database from the platform's
+                    // backup/"links" folder into bmm's data directory,
+                    // same as Alt+m/Alt+n above - works from anywhere,
+                    // even while typing, since it's an Alt combo rather
+                    // than a plain letter.
+                    if key_event.modifiers.contains(KeyModifiers::ALT)
+                        && key_event.code == KeyCode::Char('g')
+                    {
+                        return Some(Message::RequestRestoreDatabases);
+                    }
+
+                    // Alt+b backs up every local database to that same
+                    // backup/"links" folder - the reverse of Alt+g above,
+                    // same reasoning: works from anywhere, even while
+                    // typing.
+                    if key_event.modifiers.contains(KeyModifiers::ALT)
+                        && key_event.code == KeyCode::Char('b')
+                    {
+                        return Some(Message::RequestBackupDatabases);
                     }
 
                     match model.active_pane {
