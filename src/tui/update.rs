@@ -377,7 +377,10 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         Message::ShowGlobalSearch => {
             model.global_search_mode = true;
             model.note_search_mode = false;
+            model.search_input.reset();
+            model.initial = false;
             model.active_pane = ActivePane::SearchInput;
+            cmds.push(Command::GlobalSearch(None));
         }
         Message::ToggleNoteSearch => {
             if model.note_search_mode {
@@ -454,7 +457,13 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             }
 
             model.sync_starred_markers();
-            model.active_pane = ActivePane::List;
+
+            // Don't force the active pane back to List here - this message
+            // also arrives after every keystroke's live search (not just a
+            // confirmed Enter), so doing that would kick the user out of
+            // the search box after typing a single character. SubmitSearch
+            // already switches to List when the search is actually
+            // confirmed, same as the plain/note search paths.
         }
         Message::RequestDeleteBookmark => {
             model.request_delete_selected_bookmark();

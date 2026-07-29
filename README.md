@@ -312,8 +312,8 @@ bmm notes 'https://github.com/dhth/bmm' --print
 ---
 
 To allow for easy browsing, `bmm` ships with its own TUI. It can be launched
-either in a generic mode (via `bmm tui`) or in the context of a specific command
-(e.g., `bmm search tools --tui`).
+either in a generic mode (via `bmm` or `bmm tui`) or in the context of a
+specific command (e.g., `bmm search tools --tui`).
 
 The TUI lets you do the following:
 

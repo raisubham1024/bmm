@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Running `bmm` with no subcommand now opens the TUI directly, same as
+  `bmm tui`.
+
 - The Help view (`?`) has been rewritten as a set of scrollable tables, one
   per view/heading, instead of a single block of plain text. It now also
   documents every shortcut that exists in the app, including the ones that
@@ -24,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Global search (`z`) no longer kicks you out of the search box after typing
+  a single character - it used to switch back to the list view every time a
+  live search result came back, instead of only when the search was
+  actually confirmed with Enter
 - Android/Termux: `i`/`I` (open in incognito) now actually opens a private tab
   instead of a normal one; since Chrome doesn't let third-party apps load a
   url directly into an incognito tab, the url(s) are copied to the clipboard

@@ -61,6 +61,8 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
     let pool = get_db_pool(db_path).await?;
 
     match args.command {
+        None => run_tui(&pool, TuiContext::Initial, db_name.clone()).await?,
+        Some(cmd) => match cmd {
         BmmCommand::Delete {
             uris,
             skip_confirmation,
@@ -188,6 +190,7 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
         BmmCommand::Notes { uri, print } => handle_notes_command(&pool, uri, print).await?,
 
         BmmCommand::Tui => run_tui(&pool, TuiContext::Initial, db_name.clone()).await?,
+        },
     }
 
     Ok(())

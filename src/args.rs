@@ -11,8 +11,9 @@ const IMPORT_HELP: &str = include_str!("static/import-help.txt");
 #[command(long_about = LONG_ABOUT.trim())]
 #[command(version)]
 pub struct Args {
+    /// Defaults to opening bmm's TUI when no subcommand is provided
     #[command(subcommand)]
-    pub command: BmmCommand,
+    pub command: Option<BmmCommand>,
     /// Override bmm's database location (default: <DATA_DIR>/bmm/bmm.db)
     #[arg(long = "db-path", value_name = "STRING", global = true)]
     pub db_path: Option<String>,
@@ -298,6 +299,11 @@ impl std::fmt::Display for OutputFormat {
 impl std::fmt::Display for Args {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output = match &self.command {
+            None => r#"
+command      : Open TUI
+"#
+            .to_string(),
+            Some(cmd) => match cmd {
             BmmCommand::Delete {
                 uris,
                 skip_confirmation,
@@ -491,6 +497,7 @@ print only   : {print}
 command      : Open TUI
 "#
             .to_string(),
+            },
         };
 
         f.write_str(&output)

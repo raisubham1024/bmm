@@ -27,7 +27,7 @@ fn shows_help() {
     bmm has a traditional command line interface that can be used standalone or
     integrated with other tools, and a textual user interface for easy browsing.
 
-    Usage: bmm [OPTIONS] <COMMAND>
+    Usage: bmm [OPTIONS] [COMMAND]
 
     Commands:
       import    Import bookmarks from various sources
