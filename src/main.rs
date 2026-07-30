@@ -6,6 +6,7 @@ mod errors;
 mod handle;
 mod persistence;
 mod platform;
+mod self_update;
 mod tui;
 mod utils;
 

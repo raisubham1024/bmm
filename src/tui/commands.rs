@@ -44,4 +44,5 @@ pub(super) enum Command {
     CopyContentToClipboard(String),
     BackupDatabases,
     RestoreDatabases,
+    CheckForUpdate,
 }

@@ -9,6 +9,7 @@ mod save_all;
 mod search;
 mod show;
 mod tags;
+mod update;
 
 pub use check::*;
 pub use delete::*;
@@ -21,3 +22,4 @@ pub use save_all::*;
 pub use search::*;
 pub use show::*;
 pub use tags::*;
+pub use update::*;

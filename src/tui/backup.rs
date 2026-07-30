@@ -16,9 +16,16 @@
 //! uses the same folder either way. Its exact location depends on the
 //! platform, since there's no single "obvious downloads folder" shared by
 //! desktop and Android:
-//!   - Android:                ~/sdcard/Download/links
+//!   - Android:                ~/sdcard/Download(s)/links
 //!   - Windows:                C:\links
-//!   - everywhere else (Linux/macOS): ~/Download/links
+//!   - everywhere else (Linux/macOS): ~/Download(s)/links
+//!
+//! On Android and Linux/macOS, the "downloads" folder name itself isn't
+//! fixed - some systems use "Download", others "Downloads", and casing can
+//! vary too. Rather than hard-coding one spelling, bmm looks for an
+//! existing folder matching "download" or "downloads" case-insensitively
+//! (preferring "downloads" if both exist), and only creates a new
+//! "Downloads" folder if neither is found.
 //!
 //! Note: this copies the underlying files directly rather than merging
 //! records inside the databases. Restoring over a database that's
@@ -28,6 +35,38 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Looks inside `parent` for an existing subfolder matching "download" or
+/// "downloads", case-insensitively (so "download", "Download", "downloads",
+/// "Downloads", "DOWNLOADS", etc. are all recognized). If both a
+/// "download"-like and a "downloads"-like folder exist, the "downloads"
+/// one is preferred. If neither exists (or `parent` can't be read), falls
+/// back to "Downloads" so callers can create it fresh.
+fn find_downloads_folder_name(parent: &Path) -> String {
+    let mut download_match: Option<String> = None;
+    let mut downloads_match: Option<String> = None;
+
+    if let Ok(entries) = fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            match name.to_lowercase().as_str() {
+                "downloads" => downloads_match = Some(name),
+                "download" => download_match = Some(name),
+                _ => {}
+            }
+        }
+    }
+
+    downloads_match
+        .or(download_match)
+        .unwrap_or_else(|| "Downloads".to_string())
+}
 
 /// The one folder both `Alt+b` and `Alt+g` read/write, chosen per platform.
 pub(super) fn links_dir() -> Result<PathBuf, String> {
@@ -40,14 +79,17 @@ pub(super) fn links_dir() -> Result<PathBuf, String> {
     {
         let home = dirs::home_dir()
             .ok_or_else(|| "couldn't determine your home directory".to_string())?;
-        Ok(home.join("sdcard").join("Download").join("links"))
+        let sdcard = home.join("sdcard");
+        let downloads_name = find_downloads_folder_name(&sdcard);
+        Ok(sdcard.join(downloads_name).join("links"))
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "android")))]
     {
         let home = dirs::home_dir()
             .ok_or_else(|| "couldn't determine your home directory".to_string())?;
-        Ok(home.join("Download").join("links"))
+        let downloads_name = find_downloads_folder_name(&home);
+        Ok(home.join(downloads_name).join("links"))
     }
 }
 

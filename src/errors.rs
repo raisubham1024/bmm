@@ -6,6 +6,7 @@ use crate::cli::{
 };
 use crate::common::{ENV_VAR_BMM_EDITOR, ENV_VAR_EDITOR, IMPORT_FILE_FORMATS};
 use crate::persistence::{DBError, StarError};
+use crate::self_update::UpdateError;
 use crate::tui::AppTuiError;
 use crate::utils::DataDirError;
 use std::io::Error as IOError;
@@ -47,6 +48,10 @@ pub enum AppError {
     CouldntHandleNotesCommand(#[from] NotesCommandError),
     #[error("couldn't set starred status: {0}")]
     CouldntSetStarred(#[from] StarError),
+
+    // update related
+    #[error("couldn't update bmm: {0}")]
+    CouldntUpdateBmm(#[from] UpdateError),
 
     // tags related
     #[error("couldn't list tags: {0}")]
@@ -137,6 +142,19 @@ impl AppError {
                 StarError::CouldntExecuteQuery(_) => Some(1300),
                 StarError::CouldntDetermineTime(_) => Some(1301),
             },
+            AppError::CouldntUpdateBmm(e) => match e {
+                #[cfg(not(any(
+                    target_os = "android",
+                    all(target_os = "linux", target_arch = "x86_64")
+                )))]
+                UpdateError::UnsupportedPlatform => None,
+                UpdateError::CouldntBuildHttpClient(_) => Some(1400),
+                UpdateError::CouldntCheckForUpdate(_) => Some(1401),
+                UpdateError::CouldntDownloadUpdate(_) => Some(1402),
+                UpdateError::CouldntReadDownloadedBinary(_) => Some(1403),
+                UpdateError::CouldntWriteBinary { .. } => Some(1404),
+                UpdateError::CouldntSetPermissions { .. } => Some(1405),
+            },
             AppError::CouldntRenameTag(e) => match e {
                 RenameTagError::SourceAndTargetSame => None,
                 RenameTagError::NoSuchTag => None,
@@ -202,6 +220,12 @@ Check if "{editor_exe}" actually points to your text editor's executable."#)),
                 _ => None,
             },
             AppError::CouldntSaveBookmarks(SaveBookmarksError::ValidationError { .. }) => Some(IGNORE_ERRORS_MESSAGE.into()),
+            #[cfg(not(any(
+                target_os = "android",
+                all(target_os = "linux", target_arch = "x86_64")
+            )))]
+            AppError::CouldntUpdateBmm(UpdateError::UnsupportedPlatform) =>
+                Some("Suggestion: download the right binary for your platform from https://github.com/raisubham1024/bmm/releases and replace it by hand.".into()),
             _ => None,
         }
     }

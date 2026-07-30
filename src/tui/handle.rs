@@ -396,6 +396,14 @@ pub(super) async fn handle_command(
                 let _ = event_tx.try_send(Message::DatabasesRestored(result));
             });
         }
+        Command::CheckForUpdate => {
+            tokio::spawn(async move {
+                let result = crate::self_update::update_bmm()
+                    .await
+                    .map_err(|e| e.to_string());
+                let _ = event_tx.try_send(Message::UpdateCheckFinished(result));
+            });
+        }
     }
 }
 

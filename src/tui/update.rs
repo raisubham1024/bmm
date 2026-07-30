@@ -3,6 +3,7 @@ use super::common::*;
 use super::message::{Message, UrlsOpenedResult};
 use super::model::*;
 use crate::persistence::SearchTerms;
+use crate::self_update::UpdateOutcome;
 use tui_input::backend::crossterm::EventHandler;
 
 pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
@@ -44,6 +45,41 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             }
             Err(e) => {
                 model.user_message = Some(UserMessage::error(&format!("restore failed: {e}")));
+            }
+        },
+        Message::RequestCheckForUpdate => {
+            model.user_message =
+                Some(UserMessage::info("checking for updates...").with_frames_left(1));
+            cmds.push(Command::CheckForUpdate);
+        }
+        Message::UpdateCheckFinished(result) => match result {
+            Ok(UpdateOutcome::NothingToUpdate) => {
+                model.user_message = Some(
+                    UserMessage::info("no \"bmm\" binary found on PATH to update")
+                        .with_frames_left(4),
+                );
+            }
+            Ok(UpdateOutcome::UpToDate) => {
+                model.user_message =
+                    Some(UserMessage::info("Already up to date").with_frames_left(3));
+            }
+            Ok(UpdateOutcome::Updated { locations }) => {
+                let msg = if locations.len() == 1 {
+                    format!(
+                        "Update available - updated bmm at {}",
+                        locations[0].display()
+                    )
+                } else {
+                    format!(
+                        "Update available - updated bmm at {} locations",
+                        locations.len()
+                    )
+                };
+                model.user_message = Some(UserMessage::info(&msg).with_frames_left(6));
+            }
+            Err(e) => {
+                model.user_message =
+                    Some(UserMessage::error(&format!("update check failed: {e}")));
             }
         },
         Message::GoToNextListItem => model.select_next_list_item(),

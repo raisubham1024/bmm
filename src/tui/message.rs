@@ -83,6 +83,8 @@ pub enum Message {
     DatabasesBackedUp(Result<(usize, std::path::PathBuf), String>),
     RequestRestoreDatabases,
     DatabasesRestored(Result<(usize, std::path::PathBuf), String>),
+    RequestCheckForUpdate,
+    UpdateCheckFinished(Result<crate::self_update::UpdateOutcome, String>),
 }
 
 pub enum UrlsOpenedResult {
@@ -154,6 +156,16 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         && key_event.code == KeyCode::Char('b')
                     {
                         return Some(Message::RequestBackupDatabases);
+                    }
+
+                    // Alt+u checks for (and installs, if available) a
+                    // newer bmm binary at every location bmm is found on
+                    // PATH, same reasoning as Alt+m/Alt+n/Alt+g/Alt+b
+                    // above: works from anywhere, even while typing.
+                    if key_event.modifiers.contains(KeyModifiers::ALT)
+                        && key_event.code == KeyCode::Char('u')
+                    {
+                        return Some(Message::RequestCheckForUpdate);
                     }
 
                     match model.active_pane {

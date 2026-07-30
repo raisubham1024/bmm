@@ -229,6 +229,8 @@ pub enum BmmCommand {
         #[arg(short = 'p', long = "print")]
         print: bool,
     },
+    /// Check for (and install) a newer bmm binary at every location bmm is found on PATH
+    Update,
     /// Open bmm's TUI
     Tui,
 }
@@ -495,6 +497,10 @@ print only   : {print}
             ),
             BmmCommand::Tui => r#"
 command      : Open TUI
+"#
+            .to_string(),
+            BmmCommand::Update => r#"
+command      : Update bmm
 "#
             .to_string(),
             },

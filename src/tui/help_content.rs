@@ -99,7 +99,11 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!(
                 "Backup / restore",
-                "Back up every local database to a\nplain folder outside bmm (Alt+b), and\nbring them back in later or on\nanother device (Alt+g). The folder\nis: Android - ~/sdcard/Download/links,\nWindows - C:\\links, Linux/macOS -\n~/Download/links."
+                "Back up every local database to a\nplain folder outside bmm (Alt+b), and\nbring them back in later or on\nanother device (Alt+g). The folder\nis: Android - ~/sdcard/Download(s)/links,\nWindows - C:\\links, Linux/macOS -\n~/Download(s)/links. An existing\nDownload or Downloads folder (any\ncase) is reused if found."
+            ),
+            row!(
+                "Self-updating",
+                "Check for a newer bmm binary and\ninstall it at every location bmm is\nfound on PATH (\"bmm update\" from the\nCLI, or Alt+u in the TUI). Nothing\nis downloaded unless there's an\nactual update. Linux (x86_64) and\nAndroid (aarch64) only, for now."
             ),
         ],
     },
@@ -181,6 +185,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             row!(
                 "Alt+b",
                 "Back up every local database to the\nbackup/\"links\" folder - the reverse\nof Alt+g above. Works from anywhere,\neven while typing."
+            ),
+            row!(
+                "Alt+u",
+                "Check for a newer bmm binary, and\ninstall it at every location bmm is\nfound on PATH if one's available\n(shows \"Already up to date\" or\n\"Update available\" accordingly).\nWorks from anywhere, even while\ntyping. Only supported on Linux\n(x86_64) and Android (aarch64) right\nnow. Same as running \"bmm update\"\nfrom the CLI."
             ),
             row!(
                 "Esc / q",
