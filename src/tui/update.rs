@@ -109,20 +109,6 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 model.user_message =
                     Some(UserMessage::error(&format!("urls couldn't be opened: {e}")));
             }
-            #[cfg(target_os = "android")]
-            UrlsOpenedResult::SuccessNeedsPaste(count) => {
-                let msg = if count == 1 {
-                    "opened a new incognito tab; link copied to clipboard, paste it in \
-(android doesn't let apps load a url straight into incognito mode)"
-                        .to_string()
-                } else {
-                    format!(
-                        "opened a new incognito tab; {count} links copied to clipboard \
-(one per line), paste to open them"
-                    )
-                };
-                model.user_message = Some(UserMessage::info(&msg).with_frames_left(6));
-            }
             UrlsOpenedResult::Success => {}
         },
         Message::GoBackOrQuit => {
@@ -212,9 +198,18 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         },
         Message::TagsFetched(result) => match result {
             Ok(t) => {
+                // Just refreshes the data - navigating *to* the Tags List
+                // view (when that's actually wanted) already happens
+                // synchronously wherever `Command::FetchTags` gets fired
+                // for that reason (`Model::show_view`, or bmm's initial
+                // context at startup). This fetch also now runs in other
+                // situations - at startup regardless of mode, and when
+                // opening the add/edit bookmark screen, both just to keep
+                // tag-name suggestions current - so it must never itself
+                // change which pane is showing, or it'd yank the user
+                // out of whatever they were doing the moment it finishes.
                 model.all_tag_items = t.clone();
                 model.tag_items = TagItems::from(t);
-                model.active_pane = ActivePane::TagsList;
             }
             Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
         },
@@ -529,9 +524,16 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         },
         Message::StartEditBookmark(uri_editable) => {
             model.start_edit_selected_bookmark(uri_editable);
+            // Refetches `all_tag_items` (used for tag-name suggestions in
+            // this screen) right as it opens, on top of the one bmm does
+            // at startup - so suggestions are current even if a tag was
+            // added/renamed/deleted somewhere else in this same session
+            // since then.
+            cmds.push(Command::FetchTags);
         }
         Message::StartAddBookmark => {
             model.start_add_new_bookmark();
+            cmds.push(Command::FetchTags);
         }
         Message::EditFieldGotEvent(event) => match model.edit_focus {
             EditField::Uri => {
@@ -542,10 +544,15 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             }
             EditField::Tags => {
                 model.edit_tags_input.handle_event(&event);
+                model.recompute_tag_suggestions();
             }
         },
         Message::EditFieldNext => model.edit_focus_next(),
         Message::EditFieldPrev => model.edit_focus_previous(),
+        Message::TagSuggestionNext => model.tag_suggestion_next(),
+        Message::TagSuggestionPrev => model.tag_suggestion_previous(),
+        Message::AcceptTagSuggestion => model.accept_selected_tag_suggestion(),
+        Message::DismissTagSuggestions => model.dismiss_tag_suggestions(),
         Message::RequestSaveBookmarkEdit => {
             model.request_save_edit();
         }

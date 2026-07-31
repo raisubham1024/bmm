@@ -59,7 +59,7 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!(
                 "Tags",
-                "Organise bookmarks with comma-\nseparated tags; browse the Tags List\nView to see every tag and how many\nbookmarks use it."
+                "Organise bookmarks with comma-\nseparated tags; browse the Tags List\nView to see every tag and how many\nbookmarks use it. While typing tags\nin the add/edit screen, matching\nalready-saved tags pop up live below\nthe fragment you're typing - pick one\nwith Up/Down + Enter, or just keep\ntyping to ignore them."
             ),
             row!(
                 "Notes",
@@ -116,7 +116,15 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!(
                 "BMM_BROWSER_INCOGNITO_FLAG",
-                "The command-line flag that puts\nBMM_BROWSER into private/incognito\nmode. Only needed if your browser\nisn't Chromium- or Firefox-style\n(bmm defaults to \"--incognito\").\nOn Android, private opening only\nworks if Chrome is your installed\nbrowser."
+                "The command-line flag that puts\nBMM_BROWSER into private/incognito\nmode. Only needed if your browser\nisn't Chromium- or Firefox-style\n(bmm defaults to \"--incognito\").\nNot used on Android - see\nBMM_ANDROID_BROWSER_PACKAGE below."
+            ),
+            row!(
+                "BMM_ANDROID_BROWSER_PACKAGE",
+                "Android only. The package name of\nthe browser bmm should use for\nprivate/incognito tabs and for\nopening several links at once (\"i\",\n\"I\", \"O\"). bmm automatically looks\nfor Brave, then Chrome - only set\nthis if you use a different\nChromium-based browser."
+            ),
+            row!(
+                "BMM_ANDROID_BROWSER_ACTIVITY",
+                "Android only. Pairs with\nBMM_ANDROID_BROWSER_PACKAGE above;\nonly needed if your browser's main\nactivity isn't named\n\"com.google.android.apps.chrome.Main\"\n(true for Brave, Chrome, and most\nother Chromium-based browsers)."
             ),
             row!(
                 "BMM_EDITOR / EDITOR",
@@ -318,10 +326,26 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
         rows: &[
             row!("Tab / Down", "Move to the next field."),
             row!("Shift+Tab / Up", "Move to the previous field."),
+            row!(
+                "(Tags field) type",
+                "As soon as you type anything after the\nlast comma, a box of matching already-\nsaved tags pops up below the Tags\nfield, live, updating with every\nkeystroke."
+            ),
+            row!(
+                "(Tags field) Down / Up",
+                "Only while that suggestion box is\nshowing: move the highlighted\nsuggestion instead of switching\nfields."
+            ),
+            row!(
+                "(Tags field) Enter",
+                "Only while that suggestion box is\nshowing: insert the highlighted\nsuggestion (with a trailing \", \"),\nready to type the next tag."
+            ),
+            row!(
+                "(Tags field) Esc",
+                "Only while that suggestion box is\nshowing: close it without picking\nanything, without leaving this view."
+            ),
             row!("Ctrl+s", "Save your changes (asks first)."),
             row!(
                 "Esc",
-                "Cancel editing (asks first if you\nchanged something)."
+                "Cancel editing (asks first if you\nchanged something). If the tag-\nsuggestion box is open, this closes\nit instead - press Esc again to\nactually cancel."
             ),
         ],
     },

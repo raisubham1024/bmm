@@ -87,10 +87,15 @@ impl AppTui {
             TuiContext::Search(q) => {
                 initial_commands.push(Command::SearchBookmarks(q.clone()));
             }
-            TuiContext::Tags => {
-                initial_commands.push(Command::FetchTags);
-            }
+            TuiContext::Tags => {}
         }
+        // Tag-name autocomplete in the add/edit bookmark screen reads
+        // from `all_tag_items`, which needs this to have run - regardless
+        // of which context bmm started in, not just `TuiContext::Tags`.
+        // (Previously this only ran for `TuiContext::Tags`, which meant
+        // suggestions silently never showed up unless the user had
+        // visited the Tags List view - 't' - at least once first.)
+        initial_commands.push(Command::FetchTags);
         initial_commands.push(Command::FetchStarredUris);
 
         let model = Model::default(pool, context, terminal_dimensions, db_name);

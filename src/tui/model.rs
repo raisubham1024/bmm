@@ -329,6 +329,13 @@ pub(super) struct Model {
     pub(super) edit_title_input: Input,
     pub(super) edit_tags_input: Input,
     pub(super) edit_focus: EditField,
+    /// Tag names matching whatever's currently being typed after the last
+    /// comma in `edit_tags_input` (empty when there's nothing to suggest,
+    /// e.g. the fragment being typed is empty or matches nothing).
+    pub(super) tag_suggestions: Vec<String>,
+    /// Index into `tag_suggestions` that's currently highlighted (via
+    /// Up/Down), if any.
+    pub(super) tag_suggestion_selected: Option<usize>,
     pub(super) edit_original_title: Option<String>,
     pub(super) edit_original_tags: Option<String>,
     pub(super) viewing_duplicates: bool,
@@ -367,6 +374,23 @@ pub(super) struct Model {
     /// for scrolling (nothing is ever visibly "selected"), the same way
     /// `ListState` is used to scroll the other list-based views.
     pub(super) help_table_state: TableState,
+}
+
+/// Splits a tags-input value like "foo, bar, ba" into the already-
+/// completed tags before the last comma (trimmed, original casing kept -
+/// `["foo", "bar"]`) and the in-progress fragment after it (trimmed -
+/// `"ba"`). A value with no comma at all is treated as a single
+/// in-progress fragment (no completed tags yet).
+fn split_tags_input(tags_value: &str) -> (Vec<String>, String) {
+    let mut parts: Vec<&str> = tags_value.split(',').collect();
+    let fragment = parts.pop().unwrap_or("").trim().to_string();
+    let completed: Vec<String> = parts
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    (completed, fragment)
 }
 
 impl Model {
@@ -415,6 +439,8 @@ impl Model {
             edit_title_input: Input::default(),
             edit_tags_input: Input::default(),
             edit_focus: EditField::Title,
+            tag_suggestions: vec![],
+            tag_suggestion_selected: None,
             edit_original_title: None,
             edit_original_tags: None,
             viewing_duplicates: false,
@@ -826,6 +852,7 @@ impl Model {
         self.edit_original_title = None;
         self.edit_original_tags = None;
         self.edit_focus = EditField::Uri;
+        self.dismiss_tag_suggestions();
         self.active_pane = ActivePane::EditBookmark;
     }
 
@@ -857,11 +884,13 @@ impl Model {
             self.edit_original_title = title;
             self.edit_original_tags = tags;
             self.edit_focus = EditField::Title;
+            self.dismiss_tag_suggestions();
             self.active_pane = ActivePane::EditBookmark;
         }
     }
 
     pub(super) fn edit_focus_next(&mut self) {
+        self.dismiss_tag_suggestions();
         self.edit_focus = match self.edit_focus {
             EditField::Uri => EditField::Title,
             EditField::Title => EditField::Tags,
@@ -876,6 +905,7 @@ impl Model {
     }
 
     pub(super) fn edit_focus_previous(&mut self) {
+        self.dismiss_tag_suggestions();
         self.edit_focus = match self.edit_focus {
             EditField::Title => {
                 if self.edit_uri_editable {
@@ -905,6 +935,95 @@ impl Model {
         title_now != title_before || tags_now != tags_before || uri_now != uri_before
     }
 
+    //-------------------------------//
+    //  tag autocomplete suggestions  //
+    //-------------------------------//
+
+    /// Recomputes `tag_suggestions` from whatever's currently being typed
+    /// after the last comma in the tags input - called after every
+    /// keystroke while the Tags field is focused, so suggestions stay
+    /// live as the user types (matching bmm's existing already-saved
+    /// tags, via `all_tag_items`, which is kept fresh by `Command::FetchTags`).
+    pub(super) fn recompute_tag_suggestions(&mut self) {
+        let (completed, fragment) = split_tags_input(self.edit_tags_input.value());
+
+        if fragment.is_empty() {
+            self.dismiss_tag_suggestions();
+            return;
+        }
+
+        let fragment_lower = fragment.to_lowercase();
+        let completed_lower: HashSet<String> =
+            completed.iter().map(|t| t.to_lowercase()).collect();
+
+        let mut matches: Vec<String> = self
+            .all_tag_items
+            .iter()
+            .map(|t| t.name.clone())
+            .filter(|name| {
+                let name_lower = name.to_lowercase();
+                name_lower.starts_with(&fragment_lower)
+                    && name_lower != fragment_lower
+                    && !completed_lower.contains(&name_lower)
+            })
+            .collect();
+
+        matches.sort();
+        matches.truncate(MAX_TAG_SUGGESTIONS);
+
+        self.tag_suggestion_selected = if matches.is_empty() { None } else { Some(0) };
+        self.tag_suggestions = matches;
+    }
+
+    pub(super) fn tag_suggestion_next(&mut self) {
+        if self.tag_suggestions.is_empty() {
+            return;
+        }
+
+        let len = self.tag_suggestions.len();
+        self.tag_suggestion_selected = Some(match self.tag_suggestion_selected {
+            Some(i) => (i + 1) % len,
+            None => 0,
+        });
+    }
+
+    pub(super) fn tag_suggestion_previous(&mut self) {
+        if self.tag_suggestions.is_empty() {
+            return;
+        }
+
+        let len = self.tag_suggestions.len();
+        self.tag_suggestion_selected = Some(match self.tag_suggestion_selected {
+            Some(0) | None => len - 1,
+            Some(i) => i - 1,
+        });
+    }
+
+    pub(super) fn dismiss_tag_suggestions(&mut self) {
+        self.tag_suggestions.clear();
+        self.tag_suggestion_selected = None;
+    }
+
+    /// Replaces the in-progress fragment (after the last comma) in the
+    /// tags input with the currently-highlighted suggestion, followed by
+    /// ", " so the cursor's ready for the next tag - then clears the
+    /// suggestion list, since the fragment that drove it is gone.
+    pub(super) fn accept_selected_tag_suggestion(&mut self) {
+        let Some(i) = self.tag_suggestion_selected else {
+            return;
+        };
+        let Some(chosen) = self.tag_suggestions.get(i).cloned() else {
+            return;
+        };
+
+        let (mut completed, _fragment) = split_tags_input(self.edit_tags_input.value());
+        completed.push(chosen);
+
+        let new_value = format!("{}, ", completed.join(", "));
+        self.edit_tags_input = Input::new(new_value);
+        self.dismiss_tag_suggestions();
+    }
+
     pub(super) fn cancel_edit(&mut self) {
         self.edit_title_input.reset();
         self.edit_tags_input.reset();
@@ -916,6 +1035,7 @@ impl Model {
         self.edit_original_title = None;
         self.edit_original_tags = None;
         self.edit_focus = EditField::Title;
+        self.dismiss_tag_suggestions();
         self.active_pane = ActivePane::List;
     }
 

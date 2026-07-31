@@ -33,53 +33,14 @@ pub(super) async fn handle_command(
             });
         }
         Command::OpenMultipleInBrowser(urls) => {
-            tokio::spawn(async move {
-                let mut failures: Vec<String> = Vec::new();
-
-                // On Android (Termux), firing "termux-open-url" back-to-back
-                // with no gap can cause the underlying Android intent to be
-                // dropped for all but the first url — the OS/Termux:API
-                // hand-off needs a brief moment to actually complete before
-                // the next one is fired. Desktop browsers don't have this
-                // problem, so we leave that path untouched (zero delay).
-                let delay_between_opens = if cfg!(target_os = "android") {
-                    std::time::Duration::from_millis(400)
-                } else {
-                    std::time::Duration::ZERO
-                };
-
-                for (i, url) in urls.iter().enumerate() {
-                    if i > 0 && !delay_between_opens.is_zero() {
-                        tokio::time::sleep(delay_between_opens).await;
-                    }
-
-                    if let Err(e) = crate::platform::open_url(url) {
-                        failures.push(format!("{url}: {e}"));
-                    }
-                }
-
-                let message = if failures.is_empty() {
-                    Message::UrlsOpenedInBrowser(UrlsOpenedResult::Success)
-                } else {
-                    Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(std::io::Error::other(
-                        failures.join("; "),
-                    )))
-                };
-
-                let _ = event_tx.try_send(message);
-            });
+            tokio::spawn(open_urls_and_report(
+                urls,
+                crate::platform::open_url_new_tab,
+                event_tx,
+            ));
         }
         Command::OpenInBrowserIncognito(url) => {
             tokio::spawn(async move {
-                #[cfg(target_os = "android")]
-                let message = match crate::platform::open_url_incognito(&url) {
-                    Ok(_) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::SuccessNeedsPaste(1)),
-                    Err(e) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(
-                        std::io::Error::other(e),
-                    )),
-                };
-
-                #[cfg(not(target_os = "android"))]
                 let message = match crate::platform::open_url_incognito(&url) {
                     Ok(_) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::Success),
                     Err(e) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(
@@ -91,51 +52,11 @@ pub(super) async fn handle_command(
             });
         }
         Command::OpenMultipleInBrowserIncognito(urls) => {
-            tokio::spawn(async move {
-                // On Android, Chrome won't let a third-party app load urls
-                // straight into incognito tabs (see the comment on
-                // platform::termux::open_incognito_tab), so instead of
-                // opening one blank incognito tab per url (confusing, and
-                // it'd only ever be useful for the last one anyway), we
-                // copy the whole list to the clipboard - one url per line -
-                // and open a single blank incognito tab.
-                #[cfg(target_os = "android")]
-                let message = {
-                    let count = urls.len();
-                    let result = crate::platform::copy_to_clipboard(&urls.join("\n"))
-                        .and_then(|_| crate::platform::open_incognito_tab());
-
-                    match result {
-                        Ok(_) => {
-                            Message::UrlsOpenedInBrowser(UrlsOpenedResult::SuccessNeedsPaste(count))
-                        }
-                        Err(e) => Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(
-                            std::io::Error::other(e),
-                        )),
-                    }
-                };
-
-                #[cfg(not(target_os = "android"))]
-                let message = {
-                    let mut failures: Vec<String> = Vec::new();
-
-                    for url in &urls {
-                        if let Err(e) = crate::platform::open_url_incognito(url) {
-                            failures.push(format!("{url}: {e}"));
-                        }
-                    }
-
-                    if failures.is_empty() {
-                        Message::UrlsOpenedInBrowser(UrlsOpenedResult::Success)
-                    } else {
-                        Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(
-                            std::io::Error::other(failures.join("; ")),
-                        ))
-                    }
-                };
-
-                let _ = event_tx.try_send(message);
-            });
+            tokio::spawn(open_urls_and_report(
+                urls,
+                crate::platform::open_url_incognito,
+                event_tx,
+            ));
         }
         Command::SearchBookmarks(search_query) => {
             let pool = pool.clone();
@@ -516,4 +437,47 @@ async fn move_bookmarks(
             errors.join("; ")
         ))
     }
+}
+
+/// Opens each of `urls` one at a time via `open_one`, reporting the
+/// combined result as a single `Message::UrlsOpenedInBrowser` - shared by
+/// `Command::OpenMultipleInBrowser` and `Command::OpenMultipleInBrowserIncognito`,
+/// which differ only in which platform function they open each url with.
+async fn open_urls_and_report(
+    urls: Vec<String>,
+    open_one: fn(&str) -> Result<(), String>,
+    event_tx: Sender<Message>,
+) {
+    let mut failures: Vec<String> = Vec::new();
+
+    // On Android, firing intents back-to-back with no gap can cause the
+    // browser/OS hand-off to drop all but the first one - the hand-off
+    // needs a brief moment to actually complete before the next is
+    // fired. Desktop browsers don't have this problem, so that path is
+    // left untouched (zero delay).
+    let delay_between_opens = if cfg!(target_os = "android") {
+        std::time::Duration::from_millis(400)
+    } else {
+        std::time::Duration::ZERO
+    };
+
+    for (i, url) in urls.iter().enumerate() {
+        if i > 0 && !delay_between_opens.is_zero() {
+            tokio::time::sleep(delay_between_opens).await;
+        }
+
+        if let Err(e) = open_one(url) {
+            failures.push(format!("{url}: {e}"));
+        }
+    }
+
+    let message = if failures.is_empty() {
+        Message::UrlsOpenedInBrowser(UrlsOpenedResult::Success)
+    } else {
+        Message::UrlsOpenedInBrowser(UrlsOpenedResult::Failure(std::io::Error::other(
+            failures.join("; "),
+        )))
+    };
+
+    let _ = event_tx.try_send(message);
 }

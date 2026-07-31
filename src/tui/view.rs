@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Cell, List, ListDirection, ListItem, Padding, Paragraph, Row, Table},
+    widgets::{Block, Cell, List, ListDirection, ListItem, ListState, Padding, Paragraph, Row, Table},
 };
 
 pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
@@ -554,35 +554,112 @@ fn render_tag_list_view(model: &mut Model, frame: &mut Frame, search: bool) {
 }
 
 fn render_edit_bookmark_view(model: &mut Model, frame: &mut Frame) {
+    // How many extra rows the tag-suggestions box needs this frame - 0
+    // when there's nothing to show. Computed up front so the overall
+    // layout can make room for it like any other row, instead of trying
+    // to float a separate box on top after the fact (which needs manual
+    // pixel-position math that's easy to get subtly wrong).
+    let suggestion_rows = tag_suggestion_box_height(model);
+    let fields_height = 3 + 3 + 3 + suggestion_rows;
+
     let layout = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints(vec![
             Constraint::Length(2),
             Constraint::Min(8),
-            Constraint::Length(9),
+            Constraint::Length(fields_height),
             Constraint::Length(1),
         ])
         .split(frame.area());
 
     render_header(model, frame, layout[0]);
     render_bookmarks_list(model, frame, layout[1]);
-    render_edit_bookmark_fields(model, frame, layout[2]);
+    render_edit_bookmark_fields(model, frame, layout[2], suggestion_rows);
     render_status_line(model, frame, layout[3]);
 }
 
-fn render_edit_bookmark_fields(model: &Model, frame: &mut Frame, chunk: Rect) {
+/// 0 if there's nothing to show; otherwise enough rows for every current
+/// suggestion plus its border (2) - clamped so it can never ask for more
+/// room than the terminal actually has (leaving at least a few rows for
+/// the bookmarks list above), even right at bmm's minimum supported
+/// terminal size.
+fn tag_suggestion_box_height(model: &Model) -> u16 {
+    if model.edit_focus != EditField::Tags || model.tag_suggestions.is_empty() {
+        return 0;
+    }
+
+    let wanted = model.tag_suggestions.len() as u16 + 2;
+
+    // header(2) + uri(3) + title(3) + tags(3) + status(1) + a floor of 4
+    // rows kept free for the bookmarks list above.
+    let fixed_chrome = 2 + 3 + 3 + 3 + 1 + 4;
+    let available = model.terminal_dimensions.height.saturating_sub(fixed_chrome);
+
+    wanted.min(available)
+}
+
+fn render_edit_bookmark_fields(
+    model: &Model,
+    frame: &mut Frame,
+    chunk: Rect,
+    suggestion_rows: u16,
+) {
+    let mut constraints = vec![
+        Constraint::Length(3),
+        Constraint::Length(3),
+        Constraint::Length(3),
+    ];
+    if suggestion_rows > 0 {
+        constraints.push(Constraint::Length(suggestion_rows));
+    }
+
     let layout = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
-        .constraints(vec![
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-        ])
+        .constraints(constraints)
         .split(chunk);
 
     render_edit_uri_field(model, frame, layout[0]);
     render_edit_title_field(model, frame, layout[1]);
     render_edit_tags_field(model, frame, layout[2]);
+
+    if suggestion_rows > 0 {
+        render_tag_suggestions_box(model, frame, layout[3]);
+    }
+}
+
+/// Tags matching whatever's currently being typed after the last comma in
+/// the Tags field, shown as an ordinary box directly under it (pushing
+/// the bookmarks list above up to make room, rather than floating on top
+/// of it) - only rendered while that field is focused and has live
+/// suggestions (see `tag_suggestion_box_height`).
+fn render_tag_suggestions_box(model: &Model, frame: &mut Frame, chunk: Rect) {
+    let items: Vec<ListItem> = model
+        .tag_suggestions
+        .iter()
+        .map(|name| ListItem::new(name.as_str()).style(Style::new().fg(TAGS_COLOR)))
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(PRIMARY_COLOR))
+                .title(" matching tags (\u{2191}/\u{2193}, Enter to pick) ")
+                .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
+        )
+        .highlight_symbol("> ")
+        .highlight_style(Style::new().bg(PRIMARY_COLOR).fg(FG_COLOR));
+
+    // Rendered as a *stateful* widget (rather than a plain one) purely so
+    // ratatui scrolls the list to keep the selected suggestion in view -
+    // there can be more matches (`recompute_tag_suggestions` allows up to
+    // `MAX_TAG_SUGGESTIONS`) than this box has rows for. A fresh
+    // `ListState` built from `tag_suggestion_selected` on every frame is
+    // enough for that; nothing needs to persist across frames, since bmm
+    // already tracks the selected index itself.
+    let mut list_state = ListState::default();
+    list_state.select(model.tag_suggestion_selected);
+
+    frame.render_stateful_widget(list, chunk, &mut list_state);
 }
 
 fn render_edit_uri_field(model: &Model, frame: &mut Frame, chunk: Rect) {

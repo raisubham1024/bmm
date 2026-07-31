@@ -12,6 +12,7 @@ pub const TITLE: &str = " bmm ";
 pub const MIN_TERMINAL_WIDTH: u16 = 40;
 pub const MIN_TERMINAL_HEIGHT: u16 = 16;
 pub const MAX_BULK_OPEN_LINKS: usize = 30;
+pub const MAX_TAG_SUGGESTIONS: usize = 6;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) enum ActivePane {

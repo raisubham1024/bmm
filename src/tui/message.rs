@@ -1,4 +1,4 @@
-use super::common::{ActivePane, DbListPurpose};
+use super::common::{ActivePane, DbListPurpose, EditField};
 use super::model::Model;
 use crate::domain::{SavedBookmark, TagStats};
 use crate::persistence::DBError;
@@ -61,6 +61,10 @@ pub enum Message {
     EditFieldGotEvent(Event),
     EditFieldNext,
     EditFieldPrev,
+    TagSuggestionNext,
+    TagSuggestionPrev,
+    AcceptTagSuggestion,
+    DismissTagSuggestions,
     RequestSaveBookmarkEdit,
     RequestExitEdit,
     BookmarkUpdated(Result<(), String>),
@@ -89,13 +93,6 @@ pub enum Message {
 
 pub enum UrlsOpenedResult {
     Success,
-    /// Android-only: the incognito tab was opened, but couldn't be loaded
-    /// with the url(s) directly (Chrome doesn't allow third-party apps to
-    /// do that) — they were copied to the clipboard instead. The count is
-    /// how many urls were copied, so the message shown can say "1 link" vs
-    /// "N links".
-    #[cfg(target_os = "android")]
-    SuccessNeedsPaste(usize),
     Failure(IOError),
 }
 
@@ -242,6 +239,36 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         _ => Some(Message::TagSearchInputGotEvent(event)),
                     },
                     ActivePane::EditBookmark => match key_event.code {
+                        // While the tags field has live suggestions
+                        // showing, Up/Down/Enter/Esc control the
+                        // suggestion list instead of their usual
+                        // field-switching/exit behavior - checked first,
+                        // so they only take over when there's actually a
+                        // suggestion list to control.
+                        KeyCode::Down
+                            if model.edit_focus == EditField::Tags
+                                && !model.tag_suggestions.is_empty() =>
+                        {
+                            Some(Message::TagSuggestionNext)
+                        }
+                        KeyCode::Up
+                            if model.edit_focus == EditField::Tags
+                                && !model.tag_suggestions.is_empty() =>
+                        {
+                            Some(Message::TagSuggestionPrev)
+                        }
+                        KeyCode::Enter
+                            if model.edit_focus == EditField::Tags
+                                && !model.tag_suggestions.is_empty() =>
+                        {
+                            Some(Message::AcceptTagSuggestion)
+                        }
+                        KeyCode::Esc
+                            if model.edit_focus == EditField::Tags
+                                && !model.tag_suggestions.is_empty() =>
+                        {
+                            Some(Message::DismissTagSuggestions)
+                        }
                         KeyCode::Esc => Some(Message::RequestExitEdit),
                         KeyCode::Tab | KeyCode::Down => Some(Message::EditFieldNext),
                         KeyCode::BackTab | KeyCode::Up => Some(Message::EditFieldPrev),
