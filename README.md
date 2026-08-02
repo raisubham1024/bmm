@@ -1,56 +1,58 @@
 <p align="center">
   <h1 align="center">bmm</h1>
-  <p align="center">
-    <a href="https://github.com/dhth/bmm/actions/workflows/main.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/dhth/bmm/main.yml?style=flat-square"></a>
-    <a href="https://crates.io/crates/bmm"><img alt="crates.io" src="https://img.shields.io/crates/v/bmm?style=flat-square"></a>
-    <a href="https://github.com/dhth/bmm/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/release/dhth/bmm.svg?style=flat-square"></a>
-    <a href="https://github.com/dhth/bmm/releases"><img alt="Commits Since Latest Release" src="https://img.shields.io/github/commits-since/dhth/bmm/latest?style=flat-square"></a>
-  </p>
+
 </p>
 
-`bmm` (stands for "bookmarks manager") lets you get to your bookmarks in a
-flash.
+**Why use bmm?**
+
+Browser bookmarks get messy quickly. They're limited to a single browser, hard to search, and you don't know if a saved link is broken until you open it. `bmm` keeps all your bookmarks in one place, completely independent of any browser. You can instantly search for any bookmark from the terminal and open it in your default browser. It also lets you organize bookmarks into separate databases, add tags and notes, automatically check for broken links, and detect duplicate bookmarks. If you save a lot of links and want a fast, organized way to find, manage, and open them later, `bmm` is built for you.
+
+`bmm` stores all your bookmarks and links on your own computer, so you can easily save, search, manage, and open them anytime. You can use simple terminal commands or the built-in terminal interface (TUI) to browse and manage your bookmarks in an easy way.
+
 
 ![tui-2](https://github.com/user-attachments/assets/a3dc5fb7-d258-461e-86b5-f2498dfbd4dc)
 
-It does so by storing your bookmarks locally, allowing you to quickly access,
-manage, and search through them using various commands. `bmm` has a traditional
-command line interface that can be used standalone and/or integrated with other
-tools, and a textual user interface for easy browsing.
+---
 
 🤔 Motivation
 ---
 
-I'd been using [buku](https://github.com/jarun/buku) for managing my bookmarks
-via the command line. It's a fantastic tool, but I was noticing some slowdown
-after years of collecting bookmarks in it. I was curious if I could replicate
-the subset of its functionality that I used while improving search performance.
-Additionally, I missed having a TUI to browse bookmarks in. `bmm` started out as
-a way to fulfill both goals. Turns out, it runs quite a lot faster than `buku`
-(check out benchmarks
-[here](https://github.com/dhth/bmm/actions/workflows/bench.yml)). I've now moved
-my bookmark management completely to `bmm`, but `buku` remains an excellent
-tool, and those looking for a broader feature set should definitely check it
-out.
+I tried many different ways to save and organize bookmarks, but the GitHub repository **bmm** by **dhth** was the one I liked the most. It inspired me because of its simplicity and approach to bookmark management. However, I wanted a few additional features that would make it easier for everyday users. My goal is to create something that is simple to use, works well across different devices, and is easily accessible from Android phones as well. This project is inspired by **bmm**, but it is built with my own ideas and improvements. Finally, I'd like to thank my friend, whose encouragement motivated me to renew this project.
+
+---
+
 
 💾 Installation
 ---
 
-**homebrew**:
+### for Android
+- first download `termux` from github [Click here to download Termux](https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_arm64-v8a.apk) OR you can download the appropriate release for your device or operating system from the GitHub Releases page (even it available in Playstore but that version is outdated, that's why download it from github)
+- give permission to install 3rd party app (if asked). in installation time mobile give you warning but trust me everythings safe, if this security pop up then click on `install anyway`
+- once install open Termux
+- now, We run this command to stop the welcome message from appearing every time Termux opens.
+  ```bash
+  touch ~/.hushlogin
+  ```
+  &nbsp;
+- now, run these command to update and upgrade the repository / pakages
+  ```bash
+  apt update && apt upgrade
+  ```
+  &nbsp;
+- now time to download `bmm`, [Click here to download BMM for Android](https://github.com/raisubham1024/bmm/releases/download/final/bmm-android-aarch64)
 
-```sh
-brew install dhth/tap/bmm
-```
+**💁 Whether you're using Android or another device, you can download the appropriate version for your device or operating system from the GitHub Releases page.** => [Click here to see BMM for different devices](https://github.com/raisubham1024/bmm/releases/tag/final) 
 
-**cargo**:
+---
 
-```sh
-cargo install bmm
-```
+💁 My Suggestion for normal users
+---
+To avoid the complexity of commands, you can use the `bmm tui` command to open the Terminal User Interface (TUI). It provides a simple and user-friendly experience, making bookmark management easy for everyone.
 
-Or get the binaries directly from a Github [release][1]. Read more about
-verifying the authenticity of released artifacts
-[here](#-verifying-release-artifacts).
+All TUI features you can see at the bottom of this page , see this section or click here to directly jump to that section  [[#TUI Reference Manual]]
+
+---
+
 
 ⚡️ Usage
 ---
@@ -77,6 +79,46 @@ Options:
       --debug             Output debug information without doing anything
   -h, --help              Print help (see more with '--help')
 ```
+
+
+## Let's learn
+
+there is 2 way 
+1. [[#TUI]] (recommended)
+2. [[#CLI]]
+
+### TUI
+first open it by command `bmm tui` 
+
+*after that command, The screen you see is a default which is called a **Search mode** *
+ℹ️ if you are on different mode and want to open a search mode again, press `s` (for search mode)
+
+
+#### first understand that TUI (terminal User Interface) of bmm
+
+
+> [!info] 
+> Contents
+
+
+- after running a command `bmm tui` the interface you see is called "search mode", where you can search, edit, delete the bookmarks/links and all you can see all saved links by just without writing something in search mode just press `enter` 
+- when you are in search mode ,  press 'Esc' (Escape key) to switch to "Normal mode", where you can directly play with other functionalities like 'Databases, tags, etc'
+- in normal mode
+
+
+let's play with it :
+
+1. let's save one bookmark/link in bmm
+   - press 'a'  (you see )
+```bash
+#let's save one bookmark/link in bmm
+press `a` to crera
+
+```
+
+
+### CLI
+
 
 ⌨ CLI mode
 ---
@@ -312,8 +354,8 @@ bmm notes 'https://github.com/dhth/bmm' --print
 ---
 
 To allow for easy browsing, `bmm` ships with its own TUI. It can be launched
-either in a generic mode (via `bmm` or `bmm tui`) or in the context of a
-specific command (e.g., `bmm search tools --tui`).
+either in a generic mode (via `bmm tui`) or in the context of a specific command
+(e.g., `bmm search tools --tui`).
 
 The TUI lets you do the following:
 
@@ -321,8 +363,8 @@ The TUI lets you do the following:
 - List all tags
 - View bookmarks that hold a tag
 
-Feature requests for the TUI can be submitted via `bmm`'s [issues
-page](https://github.com/dhth/bmm/issues).
+Feature requests for the TUI can be submitted via `bmm's` [issues
+page](https://github.com/raisubham1024/bmm/issues).
 
 ![tui](https://github.com/user-attachments/assets/6ca63039-8872-4520-93da-1576cc0cf8ec)
 
@@ -347,13 +389,8 @@ browser, since Android has no generic "open incognito" mechanism.
 
 ### TUI Reference Manual
 
-The same reference below is also built into the TUI itself: press `?` from
-the Bookmarks List View to open the Help view, which shows every view and
-every shortcut as scrollable tables (use `j`/`k`, the arrow keys, or `g`/`G`
-to move around, and `Esc`, `q`, or `?` again to close it).
-
 ```text
-bmm has nine views.
+bmm has eight views.
 
 - Bookmarks List View
 - Tags List View
@@ -362,163 +399,85 @@ bmm has nine views.
 - Database List View
 - New Database Name View
 - Confirm View
-- Mode Switcher View
 - Help View (this one)
 
-Keymaps
+
+#you can see these views by pressing "Alt + m" in a TUI mode (bmm tui)
+
 ---
 
-General (works in every view)
-    ?                    open/close the Help view
-    Alt+m                open the Mode Switcher (jump straight to any view:
-                         all bookmarks, search, tags, duplicates, starred,
-                         search across all databases, note search,
-                         databases, help) - works from anywhere, even while
-                         typing. Press it again (or Esc/q) to close it.
-    Alt+n                turn "note search" on/off (only shows bookmarks
-                         that have a note, and searches inside the note
-                         text) - works from anywhere, even while typing
-    Esc / q              go back a step / clear the current input / exit
-    j / Down             go down in a list
-    k / Up               go up in a list
-    g                    jump to the first item in a list
-    G                    jump to the last item in a list
 
-Bookmarks List View
-    s                    show search input (results update live as you type,
-                         no need to press Enter)
-    Enter                confirm search query and close the search input
-                         (leave empty + Enter to show all bookmarks)
-    a                    add a new bookmark (URI, title, tags)
-    t / Tab              show Tags List View (when search is not active)
-    d                    show bookmarks that have a duplicate title
-    e                    edit the title/tags of the bookmark under cursor
-    E                    edit the URI (as well as title/tags) of the bookmark
-                         under cursor
-    n                    add/edit a note for the bookmark under cursor (hidden)
-    N                    delete the note for the bookmark under cursor, if it
-                         has one (asks for confirmation)
-    *                    toggle star on the bookmark under cursor
-    S                    show only starred bookmarks
-    A                    show/switch between databases
-    z                    search across all databases at once (results show
-                         which database each bookmark is from)
-    Space                mark/unmark the bookmark under cursor for a bulk
-                         move to another database (see "M" below)
-    m                    move the bookmark under cursor to another database
-                         (asks for confirmation)
-    M                    move all marked bookmarks to another database
-                         (asks for confirmation) - mark bookmarks first
-                         with Space
-    Delete / D           delete the bookmark under cursor (asks for
-                         confirmation)
-    o                    open URI in browser
-    i                    open URI in browser (incognito/private window)
-    O                    open all listed bookmarks in browser (max 30; warns if more)
-    I                    open all listed bookmarks in browser, incognito/private
-                         (max 30; warns if more)
-    y                    copy URI under cursor to system clipboard
-    Y                    copy all URIs to system clipboard
-
-Search Input (opened with "s")
-    Enter                confirm the search text and close the box (leave
-                         it empty + Enter to show all bookmarks)
-    Esc                  cancel and close the search box
-    Down / Up            move the highlighted bookmark while still typing
-
-Tags List View
-    /                    show tag search input
-    Enter                show bookmarks that are tagged with the one under cursor
-
-Tag Search Input (opened with "/")
-    Enter                confirm the filter and go back to the tag list
-    Esc                  cancel and go back to the tag list
-    Down / Up            move the highlighted tag while still typing
-
-Edit Bookmark View
-    Tab / Down           move to the next field
-    Shift+Tab / Up       move to the previous field
-    Ctrl+s               save changes (asks for confirmation)
-    Esc                  cancel editing (asks for confirmation if there are
-                         unsaved changes)
-
-Notes View
-    Ctrl+s               save the note (asks for confirmation)
-    Esc                  cancel (asks for confirmation if there are
-                         unsaved changes)
-
-Database List View
-    Enter                switch to the database under cursor for this
-                         session (resets to bmm.db next time you start bmm) -
-                         or, if you got here via "m"/"M", move the queued
-                         bookmark(s) into the database under cursor instead
-    /                    show database search input, to filter the list by name
-    C                    create a new database (only available when
-                         switching databases, not while moving bookmarks)
-    Esc                  go back
-
-Database Search Input (opened with "/")
-    Enter                confirm the filter and go back to the database list
-    Esc                  cancel and go back to the bookmarks list
-    Down / Up            move the highlighted database while still typing
-
-New Database Name View
-    Enter / Ctrl+s       create the database and switch to it
-    Esc                  cancel
-
-Mode Switcher View (opened with Alt+m)
-    j / k / Down / Up    move selection
-    g / G                jump to the first/last option
-    Enter                jump to the selected view
-    Alt+m / Esc / q      close without switching
-
-Confirm View
-    y                    confirm
-    n / Esc              cancel
-
-Help View (this one)
-    j / k / Down / Up    scroll the list
-    g / G                jump to the top/bottom
-    Esc / q / ?          close and go back
 ```
+in TUI 
 
-🔐 Verifying release artifacts
----
 
-In case you get the `bmm` binary directly from a [release][1], you may want to
-verify its authenticity. Checksums are applied to all released artifacts, and
-the resulting checksum file is attested using [Github Attestations][2].
+> [!info] bydefault TUI mode in 'Search mode', to use other functionality switch to 'Normal mode' by press 'Esc'
 
-Steps to verify (replace `A.B.C` in the commands below with the version you
-want):
 
-1. Download the sha256 checksum file for your platform from the release:
+|Most important     |     |
+| --- | --- |
+|   Alt + m  |  to switch between different modes (like )   |
 
-   ```shell
-   curl -sSLO https://github.com/dhth/bmm/releases/download/vA.B.C/bmm-x86_64-unknown-linux-gnu.tar.xz.sha256
-   ```
 
-2. Verify the integrity of the checksum file using [gh][3].
+|General    |     |
+| --- | --- |
+|   ?   |   show/hide help view  |
+|   Esc   |   go to normal mode  |
+| q | quit the TUI mode |
+| j / Down arrow | go down in a list |
+| k / Up arrow | go up in a list |
 
-   ```shell
-   gh attestation verify bmm-x86_64-unknown-linux-gnu.tar.xz.sha256 --repo dhth/bmm
-   ```
 
-3. Download the compressed archive you want, and validate its checksum:
+|   Bookmarks related  |     |
+| --- | --- |
+|   s  |  show search box   |
+|  Enter   |   submit search query  OR if you leave search box empty then press Enter, it shows all bookmarks  |
+|   a  |   add a new bookmark (URI, title, tags)  |
+|  t   |   show Tags List View (when search is not active)  |
+|   d  |  show bookmarks that have a duplicate title   |
+|   e  |   edit the title/tags of the bookmark under cursor  |
+|  E   |  edit the URI (as well as title/tags) of the bookmark under cursor   |
+|   n  |   add/edit a note for the bookmark under cursor (hidden)  |
+|   N  |  delete the note for the bookmark under cursor, if it  has one (asks for confirmation) |
+|   \*  |   toggle star on the bookmark under cursor  |
+|   S  |   show only starred bookmarks  |
+|   A  |  show/switch between databases   |
+|  z   |   search across all databases at once (results show  which database each bookmark is from) |
+|  D/delete   |   delete the bookmark under cursor (asks for confirmation)  |
+|  o   |   open URI in browser  |
+|  i   |   open URI in browser (incognito/private window)  |
+|  O   |  open all listed bookmarks in browser (max 30; warns if more)   |
+|  I   |   open all listed bookmarks in browser, incognito/private  (max 30; warns if more) |
+|  y   |   copy selected URI  |
+|  Y   |    copy all the resulted URIs to system clipboard |
 
-   ```shell
-   curl -sSLO https://github.com/dhth/bmm/releases/download/vA.B.C/bmm-x86_64-unknown-linux-gnu.tar.xz
-   sha256sum --ignore-missing -c bmm-x86_64-unknown-linux-gnu.tar.xz.sha256
-   ```
 
-3. If checksum validation goes through, uncompress the archive:
+|  Tags List View    |     |
+| --- | --- |
+|  /   |  show tag search input   |
+|   Enter  |  show bookmarks that are tagged with the one under cursor   |
 
-   ```shell
-   tar -xzf bmm-x86_64-unknown-linux-gnu.tar.xz
-   cd bmm-x86_64-unknown-linux-gnu
-   ./bmm
-   # profit!
-   ```
-[1]: https://github.com/dhth/bmm/releases
-[2]: https://github.blog/news-insights/product-news/introducing-artifact-attestations-now-in-public-beta/
-[3]: https://github.com/cli/cli
+
+|Edit Bookmark View     |     |
+| --- | --- |
+|  Tab / Down   |  move to the next field   |
+|   Shift+Tab / Up  |  move to the previous field   |
+|  Ctrl+s   |  save changes (asks for confirmation)   |
+|   Esc  |   cancel editing (asks for confirmation if there are unsaved changes) |
+
+
+|  Notes View   |     |
+| --- | --- |
+|   Ctrl+s  |  save the note (asks for confirmation)   |
+|   Esc  |   cancel (asks for confirmation if there are  unsaved changes)|
+
+
+|   Database List View  |     |
+| --- | --- |
+|   Enter  |   switch to the database under cursor for this session (resets to bmm.db next time you start bmm) |
+|  C   |  create a new database  and then "ctrl+s" to save |
+|  Esc   |   go back  |
+
+
+
+
