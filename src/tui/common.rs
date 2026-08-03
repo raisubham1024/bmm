@@ -20,6 +20,7 @@ pub(crate) enum ActivePane {
     TagsList,
     SearchInput,
     TagSearchInput,
+    RenameTag,
     EditBookmark,
     Notes,
     DatabaseList,
@@ -28,6 +29,10 @@ pub(crate) enum ActivePane {
     Confirm,
     Help,
     ModeSwitcher,
+    /// The small popup opened with Alt+s, letting the user restrict a
+    /// search (plain "s" or cross-database "z") to just URLs, just
+    /// descriptions (titles), or just tags.
+    SearchScopePicker,
 }
 
 /// Which task the [`ActivePane::DatabaseList`] / [`ActivePane::DatabaseSearchInput`]

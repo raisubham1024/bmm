@@ -1,5 +1,5 @@
 use super::common::{ActivePane, DbListPurpose, EditField};
-use super::model::Model;
+use super::model::{Model, ModeOption, SearchScopeOption};
 use crate::domain::{SavedBookmark, TagStats};
 use crate::persistence::DBError;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -32,8 +32,28 @@ pub enum Message {
     SubmitSearch,
     ShowBookmarksForTag,
     BookmarksForTagFetched(Result<Vec<SavedBookmark>, DBError>),
-    ShowDuplicates,
-    DuplicateBookmarksFetched(Result<Vec<SavedBookmark>, DBError>),
+    /// Switches the Tags List view into "all databases" mode (`T`) and
+    /// kicks off fetching tag stats aggregated across every local database.
+    ShowGlobalTagsList,
+    GlobalTagsFetched(Vec<TagStats>, Vec<String>),
+    /// Fired when a tag is selected from the Tags List view while it's in
+    /// "all databases" mode - the cross-database counterpart to
+    /// `BookmarksForTagFetched`. Carries (database display name, database
+    /// path, bookmark) triples, same shape as `GlobalSearchFinished`, plus
+    /// any per-database errors.
+    BookmarksForTagAcrossDatabasesFetched(Vec<(String, String, SavedBookmark)>, Vec<String>),
+    /// Opens the rename-tag screen (Alt+e) for whichever tag is currently
+    /// highlighted in the Tags List / Tag Search views.
+    StartRenameTag,
+    RenameTagInputGotEvent(Event),
+    RenameTagSuggestionNext,
+    RenameTagSuggestionPrev,
+    AcceptRenameTagSuggestion,
+    DismissRenameTagSuggestions,
+    RequestSaveRenameTag,
+    RequestExitRenameTag,
+    /// (old name, new name, bookmarks affected).
+    TagRenamed(String, String, Result<u64, String>),
     ShowStarred,
     StarredBookmarksFetched(Result<Vec<SavedBookmark>, DBError>),
     StarredUrisFetched(Result<HashSet<String>, DBError>),
@@ -41,6 +61,11 @@ pub enum Message {
     StarToggled(String, Result<bool, String>),
     ShowDatabaseList,
     RequestSwitchDatabase,
+    /// Jumps straight to and switches to (or picks, when moving bookmarks)
+    /// the database at this 0-based index into `filtered_dbs` - fired by
+    /// pressing its number key (1-9) in the database list, same idea as
+    /// `SelectModeByNumber`.
+    SelectDatabaseByNumber(usize),
     StartNewDatabaseName,
     NewDatabaseNameGotEvent(Event),
     RequestCreateDatabase,
@@ -55,8 +80,31 @@ pub enum Message {
     BookmarksMoved(Result<(usize, String), String>),
     ShowGlobalSearch,
     GlobalSearchFinished(Vec<(String, String, SavedBookmark)>, Vec<String>),
+    /// Opens the search-scope popup (Alt+s), letting the user restrict
+    /// the search (plain "s" or cross-database "z") to just URLs, just
+    /// descriptions (titles), or just tags.
+    ShowSearchScopePicker,
+    /// Applies whichever scope is highlighted in the popup and drops
+    /// back into the search box.
+    ConfirmSearchScopeSelection,
+    /// Jumps straight to and picks the scope option at this 0-based
+    /// index into `SearchScopeOption::ALL` - fired by pressing its
+    /// number key, same idea as `SelectModeByNumber`.
+    SelectSearchScopeByNumber(usize),
+    /// Moves the highlighted suggestion in the search box's tag-name
+    /// suggestions popup (only shown while `search_scope` is `Tag`) -
+    /// the search-box counterpart to `TagSuggestionNext`.
+    SearchTagSuggestionNext,
+    SearchTagSuggestionPrev,
+    AcceptSearchTagSuggestion,
+    DismissSearchTagSuggestions,
     RequestDeleteBookmark,
     BookmarkDeleted(String, Result<u64, DBError>),
+    /// Asks to delete every bookmark currently listed (`D`) - shows a
+    /// confirmation naming exactly how many links will be deleted before
+    /// anything happens.
+    RequestDeleteAllVisible,
+    BookmarksDeleted(Result<u64, String>),
     StartEditBookmark(bool),
     EditFieldGotEvent(Event),
     EditFieldNext,
@@ -82,6 +130,11 @@ pub enum Message {
     GoBackOrQuit,
     ToggleModeSwitcher,
     ConfirmModeSelection,
+    /// Jumps straight to and opens the mode at this 0-based index in
+    /// `ModeOption::ALL` - fired by pressing its number key (1-8) in the
+    /// mode switcher, so the user doesn't have to move the selection down
+    /// to it first and then press Enter.
+    SelectModeByNumber(usize),
     ShowAllBookmarks,
     RequestBackupDatabases,
     DatabasesBackedUp(Result<(usize, std::path::PathBuf), String>),
@@ -165,6 +218,23 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         return Some(Message::RequestCheckForUpdate);
                     }
 
+                    // Alt+s opens the search-scope popup, letting the
+                    // current (or about-to-start) search be narrowed down
+                    // to just URLs, just descriptions (titles), or just
+                    // tags - works for a plain search ("s") as well as
+                    // the cross-database search ("z"), from the List view
+                    // (before typing anything) or from the search box
+                    // itself (while typing). Doesn't apply to note search
+                    // (Alt+n), so it's guarded by pane/mode rather than
+                    // being truly global like the combos above.
+                    if key_event.modifiers.contains(KeyModifiers::ALT)
+                        && key_event.code == KeyCode::Char('s')
+                        && !model.note_search_mode
+                        && matches!(model.active_pane, ActivePane::List | ActivePane::SearchInput)
+                    {
+                        return Some(Message::ShowSearchScopePicker);
+                    }
+
                     match model.active_pane {
                     ActivePane::List => match key_event.code {
                         KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
@@ -176,12 +246,18 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('O') => Some(Message::RequestOpenAllInBrowser),
                         KeyCode::Char('I') => Some(Message::RequestOpenAllInBrowserIncognito),
                         KeyCode::Char('s') => Some(Message::ShowView(ActivePane::SearchInput)),
+                        // Shows all bookmarks of the current database -
+                        // same target as the mode switcher's 1st option
+                        // ("all bookmarks of current database [l]"), and
+                        // as pressing Enter on a blank query in search mode.
+                        KeyCode::Char('l') => Some(Message::ShowAllBookmarks),
                         KeyCode::Char('a') => Some(Message::StartAddBookmark),
                         KeyCode::Char('t') | KeyCode::Tab => {
                             Some(Message::ShowView(ActivePane::TagsList))
                         }
-                        KeyCode::Char('d') => Some(Message::ShowDuplicates),
-                        KeyCode::Char('D') => Some(Message::RequestDeleteBookmark),
+                        KeyCode::Char('T') => Some(Message::ShowGlobalTagsList),
+                        KeyCode::Char('d') => Some(Message::RequestDeleteBookmark),
+                        KeyCode::Char('D') => Some(Message::RequestDeleteAllVisible),
                         KeyCode::Char('S') => Some(Message::ShowStarred),
                         KeyCode::Char('*') => Some(Message::RequestToggleStar),
                         KeyCode::Char('A') => Some(Message::ShowDatabaseList),
@@ -215,6 +291,18 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         _ => None,
                     },
                     ActivePane::SearchInput => match key_event.code {
+                        KeyCode::Down if !model.search_tag_suggestions.is_empty() => {
+                            Some(Message::SearchTagSuggestionNext)
+                        }
+                        KeyCode::Up if !model.search_tag_suggestions.is_empty() => {
+                            Some(Message::SearchTagSuggestionPrev)
+                        }
+                        KeyCode::Enter if !model.search_tag_suggestions.is_empty() => {
+                            Some(Message::AcceptSearchTagSuggestion)
+                        }
+                        KeyCode::Esc if !model.search_tag_suggestions.is_empty() => {
+                            Some(Message::DismissSearchTagSuggestions)
+                        }
                         KeyCode::Esc => Some(Message::GoBackOrQuit),
                         KeyCode::Enter => Some(Message::SubmitSearch),
                         KeyCode::Down => Some(Message::GoToNextListItem),
@@ -227,6 +315,11 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('g') => Some(Message::GoToFirstListItem),
                         KeyCode::Char('G') => Some(Message::GoToLastListItem),
                         KeyCode::Char('/') => Some(Message::ShowView(ActivePane::TagSearchInput)),
+                        KeyCode::Char('e')
+                            if key_event.modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            Some(Message::StartRenameTag)
+                        }
                         KeyCode::Enter => Some(Message::ShowBookmarksForTag),
                         KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
                         _ => None,
@@ -236,7 +329,39 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Enter => Some(Message::SubmitTagSearch),
                         KeyCode::Down => Some(Message::GoToNextListItem),
                         KeyCode::Up => Some(Message::GoToPreviousListItem),
+                        KeyCode::Char('e')
+                            if key_event.modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            Some(Message::StartRenameTag)
+                        }
                         _ => Some(Message::TagSearchInputGotEvent(event)),
+                    },
+                    ActivePane::RenameTag => match key_event.code {
+                        // While the suggestion list is showing, Up/Down/
+                        // Enter/Esc control it instead of their usual
+                        // text-input/exit behavior - checked first, so
+                        // they only take over when there's actually a
+                        // suggestion list to control (same pattern as the
+                        // Tags field in the Edit Bookmark screen).
+                        KeyCode::Down if !model.rename_tag_suggestions.is_empty() => {
+                            Some(Message::RenameTagSuggestionNext)
+                        }
+                        KeyCode::Up if !model.rename_tag_suggestions.is_empty() => {
+                            Some(Message::RenameTagSuggestionPrev)
+                        }
+                        KeyCode::Enter if !model.rename_tag_suggestions.is_empty() => {
+                            Some(Message::AcceptRenameTagSuggestion)
+                        }
+                        KeyCode::Esc if !model.rename_tag_suggestions.is_empty() => {
+                            Some(Message::DismissRenameTagSuggestions)
+                        }
+                        KeyCode::Esc => Some(Message::RequestExitRenameTag),
+                        KeyCode::Char('s')
+                            if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            Some(Message::RequestSaveRenameTag)
+                        }
+                        _ => Some(Message::RenameTagInputGotEvent(event)),
                     },
                     ActivePane::EditBookmark => match key_event.code {
                         // While the tags field has live suggestions
@@ -303,6 +428,21 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('C') if model.db_list_purpose == DbListPurpose::Switch => {
                             Some(Message::StartNewDatabaseName)
                         }
+                        // Number keys 1-9 jump straight to (and pick) the
+                        // database shown next to that number in the list,
+                        // same shortcut style as the mode switcher below -
+                        // only fires while that many databases are actually
+                        // listed, so a stray digit past the end falls
+                        // through to `_ => None` instead of doing nothing
+                        // silently.
+                        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                            let index = (c as usize) - ('1' as usize);
+                            if index < model.filtered_dbs.len() {
+                                Some(Message::SelectDatabaseByNumber(index))
+                            } else {
+                                None
+                            }
+                        }
                         KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
                         _ => None,
                     },
@@ -336,6 +476,37 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('g') => Some(Message::GoToFirstListItem),
                         KeyCode::Char('G') => Some(Message::GoToLastListItem),
                         KeyCode::Enter => Some(Message::ConfirmModeSelection),
+                        // Number keys 1-8 jump straight to and open the
+                        // mode shown next to that number, without needing
+                        // to move the selection down to it first.
+                        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                            let index = (c as usize) - ('1' as usize);
+                            if index < ModeOption::ALL.len() {
+                                Some(Message::SelectModeByNumber(index))
+                            } else {
+                                None
+                            }
+                        }
+                        KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
+                        _ => None,
+                    },
+                    ActivePane::SearchScopePicker => match key_event.code {
+                        KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
+                        KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
+                        KeyCode::Char('g') => Some(Message::GoToFirstListItem),
+                        KeyCode::Char('G') => Some(Message::GoToLastListItem),
+                        KeyCode::Enter => Some(Message::ConfirmSearchScopeSelection),
+                        // Number keys 1-4 jump straight to and pick the
+                        // scope shown next to that number, without
+                        // needing to move the selection down to it first.
+                        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                            let index = (c as usize) - ('1' as usize);
+                            if index < SearchScopeOption::ALL.len() {
+                                Some(Message::SelectSearchScopeByNumber(index))
+                            } else {
+                                None
+                            }
+                        }
                         KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
                         _ => None,
                     },

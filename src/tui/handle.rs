@@ -1,13 +1,13 @@
 use super::commands::Command;
 use super::message::{Message, UrlsOpenedResult};
 use crate::common::DEFAULT_LIMIT;
-use crate::domain::{DraftBookmark, PotentialBookmark};
+use crate::domain::{DraftBookmark, PotentialBookmark, Tag};
 use crate::persistence::{
     DBError, SaveBookmarkOptions, create_or_update_bookmark, delete_bookmarks_with_uris,
     get_all_bookmarks, get_bookmark_with_exact_uri, get_bookmarks, get_bookmarks_by_query,
-    get_bookmarks_with_notes, get_db_pool, get_duplicate_bookmarks, get_note,
-    get_starred_bookmarks, get_starred_uris, get_tags_with_stats, rename_bookmark_uri, set_note,
-    set_starred, toggle_starred,
+    get_bookmarks_with_notes, get_db_pool, get_note, get_starred_bookmarks, get_starred_uris,
+    get_tags_with_stats, rename_bookmark_uri, rename_tag_name, set_note, set_starred,
+    toggle_starred,
 };
 use sqlx::{Pool, Sqlite};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -58,10 +58,11 @@ pub(super) async fn handle_command(
                 event_tx,
             ));
         }
-        Command::SearchBookmarks(search_query) => {
+        Command::SearchBookmarks(search_query, scope) => {
             let pool = pool.clone();
             tokio::spawn(async move {
-                let result = get_bookmarks_by_query(&pool, &search_query, DEFAULT_LIMIT).await;
+                let result =
+                    get_bookmarks_by_query(&pool, &search_query, DEFAULT_LIMIT, scope).await;
                 let message = Message::SearchFinished(result);
                 let _ = event_tx.try_send(message);
             });
@@ -89,11 +90,66 @@ pub(super) async fn handle_command(
                 let _ = event_tx.try_send(message);
             });
         }
-        Command::FetchDuplicateBookmarks => {
-            let pool = pool.clone();
+        Command::FetchGlobalTags => {
             tokio::spawn(async move {
-                let result = get_duplicate_bookmarks(&pool).await;
-                let _ = event_tx.try_send(Message::DuplicateBookmarksFetched(result));
+                let mut totals: std::collections::BTreeMap<String, i64> =
+                    std::collections::BTreeMap::new();
+                let mut errors: Vec<String> = Vec::new();
+
+                for (name, path) in local_db_files() {
+                    match get_db_pool(&path).await {
+                        Ok(db_pool) => match get_tags_with_stats(&db_pool).await {
+                            Ok(stats) => {
+                                for stat in stats {
+                                    *totals.entry(stat.name).or_insert(0) += stat.num_bookmarks;
+                                }
+                            }
+                            Err(e) => errors.push(format!("{name}: {e}")),
+                        },
+                        Err(e) => errors.push(format!("{name}: {e}")),
+                    }
+                }
+
+                let tags: Vec<crate::domain::TagStats> = totals
+                    .into_iter()
+                    .map(|(name, num_bookmarks)| crate::domain::TagStats {
+                        name,
+                        num_bookmarks,
+                    })
+                    .collect();
+
+                let _ = event_tx.try_send(Message::GlobalTagsFetched(tags, errors));
+            });
+        }
+        Command::FetchBookmarksForTagAcrossDatabases(tag) => {
+            tokio::spawn(async move {
+                let mut all_results: Vec<(String, String, crate::domain::SavedBookmark)> =
+                    Vec::new();
+                let mut errors: Vec<String> = Vec::new();
+
+                for (name, path) in local_db_files() {
+                    match get_db_pool(&path).await {
+                        Ok(db_pool) => {
+                            let result =
+                                get_bookmarks(&db_pool, None, None, vec![tag.clone()], DEFAULT_LIMIT)
+                                    .await;
+                            match result {
+                                Ok(bookmarks) => {
+                                    for b in bookmarks {
+                                        all_results.push((name.clone(), path.clone(), b));
+                                    }
+                                }
+                                Err(e) => errors.push(format!("{name}: {e}")),
+                            }
+                        }
+                        Err(e) => errors.push(format!("{name}: {e}")),
+                    }
+                }
+
+                let _ = event_tx.try_send(Message::BookmarksForTagAcrossDatabasesFetched(
+                    all_results,
+                    errors,
+                ));
             });
         }
         Command::FetchStarredBookmarks => {
@@ -142,6 +198,24 @@ pub(super) async fn handle_command(
                 .await;
 
                 let _ = event_tx.try_send(Message::BookmarkDeleted(uri_for_message, result));
+            });
+        }
+        Command::DeleteBookmarks(items) => {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let result = delete_bookmarks(&pool, items).await;
+                let _ = event_tx.try_send(Message::BookmarksDeleted(result));
+            });
+        }
+        Command::RenameTag {
+            old_name,
+            new_name,
+            global,
+        } => {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let result = rename_tag(&pool, &old_name, &new_name, global).await;
+                let _ = event_tx.try_send(Message::TagRenamed(old_name, new_name, result));
             });
         }
         Command::FetchNote(uri) => {
@@ -222,55 +296,33 @@ pub(super) async fn handle_command(
                 let _ = event_tx.try_send(Message::BookmarkUpdated(result));
             });
         }
-        Command::GlobalSearch(search_terms) => {
+        Command::GlobalSearch(search_terms, scope) => {
             tokio::spawn(async move {
                 let mut all_results: Vec<(String, String, crate::domain::SavedBookmark)> =
                     Vec::new();
                 let mut errors: Vec<String> = Vec::new();
 
-                if let Ok(data_dir) = crate::utils::get_data_dir() {
-                    let bmm_dir = data_dir.join("bmm");
-
-                    if let Ok(entries) = std::fs::read_dir(&bmm_dir) {
-                        let mut db_files: Vec<(String, String)> = Vec::new();
-
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.extension().and_then(|e| e.to_str()) != Some("db") {
-                                continue;
-                            }
-                            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                                continue;
+                for (name, path) in local_db_files() {
+                    match get_db_pool(&path).await {
+                        Ok(db_pool) => {
+                            let result = match &search_terms {
+                                Some(terms) => {
+                                    get_bookmarks_by_query(&db_pool, terms, DEFAULT_LIMIT, scope)
+                                        .await
+                                }
+                                None => get_all_bookmarks(&db_pool).await,
                             };
-                            let Some(path_str) = path.to_str() else {
-                                continue;
-                            };
-                            db_files.push((name.to_string(), path_str.to_string()));
-                        }
 
-                        for (name, path) in db_files {
-                            match get_db_pool(&path).await {
-                                Ok(db_pool) => {
-                                    let result = match &search_terms {
-                                        Some(terms) => {
-                                            get_bookmarks_by_query(&db_pool, terms, DEFAULT_LIMIT)
-                                                .await
-                                        }
-                                        None => get_all_bookmarks(&db_pool).await,
-                                    };
-
-                                    match result {
-                                        Ok(bookmarks) => {
-                                            for b in bookmarks {
-                                                all_results.push((name.clone(), path.clone(), b));
-                                            }
-                                        }
-                                        Err(e) => errors.push(format!("{name}: {e}")),
+                            match result {
+                                Ok(bookmarks) => {
+                                    for b in bookmarks {
+                                        all_results.push((name.clone(), path.clone(), b));
                                     }
                                 }
                                 Err(e) => errors.push(format!("{name}: {e}")),
                             }
                         }
+                        Err(e) => errors.push(format!("{name}: {e}")),
                     }
                 }
 
@@ -328,8 +380,162 @@ pub(super) async fn handle_command(
     }
 }
 
+/// Renames a tag - updating every bookmark that used it - either in just
+/// `pool`'s database, or (`global: true`) across every local database.
+/// Merges into `new_name` if it already exists as a tag (`rename_tag_name`
+/// takes care of that), rather than ending up with a duplicate tag.
+///
+/// Returns the total number of bookmarks whose tag was actually renamed.
+/// As with `delete_bookmarks`, a global rename that partially fails still
+/// keeps whatever succeeded and reports both the successes and the
+/// failures rather than losing the successful part.
+async fn rename_tag(
+    pool: &Pool<Sqlite>,
+    old_name: &str,
+    new_name: &str,
+    global: bool,
+) -> Result<u64, String> {
+    // Validated once up front so an invalid new name fails fast, before
+    // touching any database - `Tag` isn't `Clone`, so a fresh one still
+    // has to be built from `new_name` per-database below.
+    if Tag::try_from(new_name).is_err() {
+        return Err(format!(
+            "\"{new_name}\" isn't a valid tag name (letters, numbers, \"_\"/\"-\", and \"/\" for nesting, 1-30 chars per segment)"
+        ));
+    }
+
+    if !global {
+        let Ok(new_tag) = Tag::try_from(new_name) else {
+            unreachable!("validated above");
+        };
+        return rename_tag_name(pool, old_name.to_string(), new_tag)
+            .await
+            .map_err(|e| format!("{e}"));
+    }
+
+    let mut total = 0u64;
+    let mut errors: Vec<String> = Vec::new();
+
+    for (name, path) in local_db_files() {
+        let Ok(new_tag) = Tag::try_from(new_name) else {
+            unreachable!("validated above");
+        };
+
+        match get_db_pool(&path).await {
+            Ok(db_pool) => match rename_tag_name(&db_pool, old_name.to_string(), new_tag).await {
+                Ok(n) => total += n,
+                Err(e) => errors.push(format!("{name}: {e}")),
+            },
+            Err(e) => errors.push(format!("{name}: {e}")),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(total)
+    } else if total == 0 {
+        Err(errors.join("; "))
+    } else {
+        Err(format!(
+            "renamed for {total} bookmark(s), but failed for: {}",
+            errors.join("; ")
+        ))
+    }
+}
+
 fn copy_content_to_clipboard(content: &str) -> Result<(), String> {
     crate::platform::copy_to_clipboard(content)
+}
+
+/// Lists every local bmm database file (name, full path) found in bmm's
+/// data directory - the same set of databases `Command::GlobalSearch`
+/// searches across. Shared by every "across all databases" command
+/// (`GlobalSearch`, `FetchGlobalTags`, `FetchBookmarksForTagAcrossDatabases`)
+/// so they all agree on exactly which databases count as "all of them".
+/// Returns an empty list (rather than erroring) if the data directory can't
+/// be read - callers just end up with no results, same as before this was
+/// factored out.
+fn local_db_files() -> Vec<(String, String)> {
+    let mut db_files: Vec<(String, String)> = Vec::new();
+
+    if let Ok(data_dir) = crate::utils::get_data_dir() {
+        let bmm_dir = data_dir.join("bmm");
+
+        if let Ok(entries) = std::fs::read_dir(&bmm_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("db") {
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                let Some(path_str) = path.to_str() else {
+                    continue;
+                };
+                db_files.push((name.to_string(), path_str.to_string()));
+            }
+        }
+    }
+
+    db_files
+}
+
+/// Deletes every bookmark in `items` - (uri, source database path, `None`
+/// meaning the currently active database) - grouping by source database so
+/// each database is only opened once. Used for "delete every currently
+/// listed bookmark" (`D`), whose items may span several databases when
+/// they came from a global search/tag result.
+///
+/// Returns the total number of bookmarks actually deleted. If any
+/// bookmark(s) fail to delete, the rest are still attempted; partial/total
+/// failure is reported as `Err` with a combined message (bookmarks that did
+/// delete successfully stay deleted either way).
+async fn delete_bookmarks(
+    pool: &Pool<Sqlite>,
+    items: Vec<(String, Option<String>)>,
+) -> Result<u64, String> {
+    use std::collections::HashMap;
+
+    let mut by_db: HashMap<Option<String>, Vec<String>> = HashMap::new();
+    for (uri, source_db_path) in items {
+        by_db.entry(source_db_path).or_default().push(uri);
+    }
+
+    let mut deleted = 0u64;
+    let mut errors: Vec<String> = Vec::new();
+
+    for (source_db_path, uris) in by_db {
+        let result: Result<u64, String> = async {
+            let source_pool = match &source_db_path {
+                Some(path) => get_db_pool(path).await.map_err(|e| format!("{e}"))?,
+                None => pool.clone(),
+            };
+
+            delete_bookmarks_with_uris(&source_pool, &uris)
+                .await
+                .map_err(|e| format!("{e}"))
+        }
+        .await;
+
+        match result {
+            Ok(n) => deleted += n,
+            Err(e) => errors.push(format!(
+                "{}: {e}",
+                source_db_path.as_deref().unwrap_or("active database")
+            )),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(deleted)
+    } else if deleted == 0 {
+        Err(errors.join("; "))
+    } else {
+        Err(format!(
+            "deleted {deleted}, but failed for: {}",
+            errors.join("; ")
+        ))
+    }
 }
 
 /// Moves each bookmark (with its title, tags, note, and starred status) out

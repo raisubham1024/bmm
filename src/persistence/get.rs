@@ -12,6 +12,25 @@ pub enum SearchTermsError {
     TooManyTerms,
 }
 
+/// Which part of a bookmark a search should be matched against - used by
+/// [`get_bookmarks_by_query`] to narrow a search down to just one field
+/// instead of the default "match any of them" behavior. Exposed to the
+/// TUI's Alt+s "search scope" popup (see `tui::model::SearchScopeOption`)
+/// and to the cross-database ("z") search, which takes the same scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchScope {
+    /// Match if the URL, title, or any tag matches (bmm's original,
+    /// still-default search behavior).
+    #[default]
+    All,
+    /// Match on the URL only.
+    Url,
+    /// Match on the title only (shown to the user as "description").
+    Description,
+    /// Match on tag names only.
+    Tag,
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchTerms(Vec<String>);
 
@@ -499,7 +518,24 @@ pub async fn get_bookmarks_by_query(
     pool: &Pool<Sqlite>,
     search_terms: &SearchTerms,
     limit: u16,
+    scope: SearchScope,
 ) -> Result<Vec<SavedBookmark>, DBError> {
+    // The per-term SQL fragment, and how many `?` placeholders it needs -
+    // kept together so the fragment and its bind count can never drift
+    // apart as scopes are added/changed.
+    let (condition, binds_per_term): (&str, usize) = match scope {
+        SearchScope::All => (
+            "(b.uri LIKE ? OR b.title LIKE ? OR EXISTS (SELECT 1 FROM tags t JOIN bookmark_tags bt ON t.id = bt.tag_id WHERE bt.bookmark_id = b.id AND t.name LIKE ?))",
+            3,
+        ),
+        SearchScope::Url => ("b.uri LIKE ?", 1),
+        SearchScope::Description => ("b.title LIKE ?", 1),
+        SearchScope::Tag => (
+            "EXISTS (SELECT 1 FROM tags t JOIN bookmark_tags bt ON t.id = bt.tag_id WHERE bt.bookmark_id = b.id AND t.name LIKE ?)",
+            1,
+        ),
+    };
+
     let query = format!(
         r#"
 SELECT
@@ -529,7 +565,7 @@ LIMIT
 "#,
         search_terms
             .iter()
-        .map(|_| "(b.uri LIKE ? OR b.title LIKE ? OR EXISTS (SELECT 1 FROM tags t JOIN bookmark_tags bt ON t.id = bt.tag_id WHERE bt.bookmark_id = b.id AND t.name LIKE ?))")
+            .map(|_| condition)
             .collect::<Vec<&str>>()
             .join(" AND ")
     );
@@ -542,9 +578,9 @@ LIMIT
         .collect::<Vec<_>>();
 
     for term in search_terms_with_like_markers.iter() {
-        query_builder = query_builder.bind(term);
-        query_builder = query_builder.bind(term);
-        query_builder = query_builder.bind(term);
+        for _ in 0..binds_per_term {
+            query_builder = query_builder.bind(term);
+        }
     }
 
     query_builder = query_builder.bind(limit);
@@ -701,58 +737,6 @@ ORDER BY name
 
 pub async fn get_all_bookmarks(pool: &Pool<Sqlite>) -> Result<Vec<SavedBookmark>, DBError> {
     get_bookmarks(pool, None, None, vec![], 1000).await
-}
-
-/// Returns bookmarks that share a title with at least one other bookmark.
-///
-/// Note: a bookmark's URI is guaranteed unique by the database schema, so
-/// "duplicate" here is defined as bookmarks that have the same (non-empty)
-/// title, since that's the practical way two saved bookmarks can end up
-/// pointing at what's effectively the same thing (eg. the same article
-/// saved under two slightly different URLs).
-pub async fn get_duplicate_bookmarks(pool: &Pool<Sqlite>) -> Result<Vec<SavedBookmark>, DBError> {
-    let bookmarks = sqlx::query_as::<_, SavedBookmark>(
-        r#"
-SELECT
-    uri,
-    title,
-    (
-        SELECT
-            GROUP_CONCAT(t.name, ',' ORDER BY t.name ASC)
-        FROM
-            tags t
-            JOIN bookmark_tags bt ON t.id = bt.tag_id
-        WHERE
-            bt.bookmark_id = b.id
-    ) AS tags
-FROM
-    bookmarks b
-WHERE
-    title IS NOT NULL
-    AND TRIM(title) != ''
-    AND title IN (
-        SELECT
-            title
-        FROM
-            bookmarks
-        WHERE
-            title IS NOT NULL
-            AND TRIM(title) != ''
-        GROUP BY
-            title
-        HAVING
-            COUNT(*) > 1
-    )
-ORDER BY
-    title ASC,
-    uri ASC
-"#,
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| DBError::CouldntExecuteQuery("fetch duplicate bookmarks".into(), e))?;
-
-    Ok(bookmarks)
 }
 
 #[cfg(test)]
@@ -1225,7 +1209,9 @@ mod tests {
 
         // WHEN
         for (query, expected_num_bookmarks) in test_cases {
-            let bookmarks = get_bookmarks_by_query(&fx.pool, &query, 10).await.unwrap();
+            let bookmarks = get_bookmarks_by_query(&fx.pool, &query, 10, SearchScope::All)
+                .await
+                .unwrap();
 
             // THEN
             assert_eq!(
@@ -1245,7 +1231,7 @@ mod tests {
 
         // WHEN
         let search_terms = SearchTerms::try_from("crate page").unwrap();
-        let bookmarks = get_bookmarks_by_query(&fx.pool, &search_terms, 10)
+        let bookmarks = get_bookmarks_by_query(&fx.pool, &search_terms, 10, SearchScope::All)
             .await
             .unwrap();
 

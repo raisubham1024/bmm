@@ -2,7 +2,7 @@ use super::commands::Command;
 use super::common::*;
 use super::message::{Message, UrlsOpenedResult};
 use super::model::*;
-use crate::persistence::SearchTerms;
+use crate::persistence::{SearchScope, SearchTerms};
 use crate::self_update::UpdateOutcome;
 use tui_input::backend::crossterm::EventHandler;
 
@@ -143,9 +143,49 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 cmds.extend(follow_up_cmds);
             }
         }
+        Message::SelectModeByNumber(index) => {
+            // Move the highlight onto the chosen mode first, then reuse
+            // `ConfirmModeSelection`'s own logic to open it - keeps this a
+            // one-line "select + confirm" shortcut instead of a second copy
+            // of the open-mode logic.
+            model.mode_switcher_state.select(Some(index));
+            let follow_up_cmds = update(model, Message::ConfirmModeSelection);
+            cmds.extend(follow_up_cmds);
+        }
+        Message::ShowSearchScopePicker => {
+            model.open_search_scope_picker();
+        }
+        Message::ConfirmSearchScopeSelection => {
+            cmds.extend(model.confirm_search_scope_selection());
+        }
+        Message::SelectSearchScopeByNumber(index) => {
+            // Same "select + confirm" shortcut as `SelectModeByNumber`.
+            model.scope_picker_state.select(Some(index));
+            cmds.extend(model.confirm_search_scope_selection());
+        }
+        Message::SearchTagSuggestionNext => model.search_tag_suggestion_next(),
+        Message::SearchTagSuggestionPrev => model.search_tag_suggestion_previous(),
+        Message::AcceptSearchTagSuggestion => {
+            model.accept_selected_search_tag_suggestion();
+            if let Some(c) = model.live_search_command() {
+                cmds.push(c);
+            }
+        }
+        Message::DismissSearchTagSuggestions => model.dismiss_search_tag_suggestions(),
         Message::ShowAllBookmarks => {
+            // This is what the mode switcher's 1st option ("all
+            // bookmarks") sends. It's made to match exactly what pressing
+            // Enter on a blank query does in the default search mode
+            // (`SubmitSearch`'s empty-query branch below) - same resets,
+            // same target pane, same command - so both paths land in the
+            // identical state instead of drifting apart (e.g. a leftover
+            // note-search flag or stale search box text).
             model.global_search_mode = false;
+            model.note_search_mode = false;
+            model.search_scope = SearchScope::All;
+            model.dismiss_search_tag_suggestions();
             model.initial = false;
+            model.search_input.reset();
             model.active_pane = ActivePane::List;
             cmds.push(Command::FetchAllBookmarks);
         }
@@ -158,7 +198,6 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         Message::GoToLastListItem => model.select_last_list_item(),
         Message::SearchFinished(result) => match result {
             Ok(bookmarks) => {
-                model.viewing_duplicates = false;
                 model.showing_starred = false;
                 model.initial = false;
                 if bookmarks.is_empty() {
@@ -183,7 +222,6 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         },
         Message::AllBookmarksFetched(result) => match result {
             Ok(bookmarks) => {
-                model.viewing_duplicates = false;
                 model.showing_starred = false;
                 model.initial = false;
                 if bookmarks.is_empty() {
@@ -220,6 +258,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             // underneath the search box (the banner screen doesn't render
             // the list at all).
             model.initial = false;
+            model.recompute_search_tag_suggestions();
             if let Some(c) = model.live_search_command() {
                 cmds.push(c);
             }
@@ -235,15 +274,18 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             model.cancel_tag_search();
         }
         Message::SubmitSearch => {
-            let search_query = model.search_input.value();
+            let search_query = model.search_input.value().to_string();
             let is_global = model.global_search_mode;
             let is_note_search = model.note_search_mode;
+            let scope = model.search_scope;
             model.global_search_mode = false;
             model.note_search_mode = false;
+            model.search_scope = SearchScope::All;
+            model.dismiss_search_tag_suggestions();
 
             if search_query.trim().is_empty() {
                 if is_global {
-                    cmds.push(Command::GlobalSearch(None));
+                    cmds.push(Command::GlobalSearch(None, scope));
                 } else if is_note_search {
                     cmds.push(Command::SearchNotes(None));
                 } else {
@@ -255,14 +297,14 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 model.search_input.reset();
                 model.active_pane = ActivePane::List;
             } else {
-                match SearchTerms::try_from(search_query) {
+                match SearchTerms::try_from(search_query.as_str()) {
                     Ok(search_terms) => {
                         if is_global {
-                            cmds.push(Command::GlobalSearch(Some(search_terms)));
+                            cmds.push(Command::GlobalSearch(Some(search_terms), scope));
                         } else if is_note_search {
                             cmds.push(Command::SearchNotes(Some(search_terms)));
                         } else {
-                            cmds.push(Command::SearchBookmarks(search_terms));
+                            cmds.push(Command::SearchBookmarks(search_terms, scope));
                         }
                         if model.initial {
                             model.initial = false;
@@ -283,12 +325,17 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             if let Some(current_tag_index) = model.tag_items.state.selected()
                 && let Some(selected_tag) = model.tag_items.items.get(current_tag_index)
             {
-                cmds.push(Command::FetchBookmarksForTag(selected_tag.name.to_string()));
+                if model.global_tags_mode {
+                    cmds.push(Command::FetchBookmarksForTagAcrossDatabases(
+                        selected_tag.name.to_string(),
+                    ));
+                } else {
+                    cmds.push(Command::FetchBookmarksForTag(selected_tag.name.to_string()));
+                }
             }
         }
         Message::BookmarksForTagFetched(result) => match result {
             Ok(bookmarks) => {
-                model.viewing_duplicates = false;
                 model.showing_starred = false;
                 model.initial = false;
                 model.bookmark_items = BookmarkItems::from(bookmarks);
@@ -297,31 +344,101 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             }
             Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
         },
-        Message::ShowDuplicates => {
-            cmds.push(Command::FetchDuplicateBookmarks);
+        Message::ShowGlobalTagsList => {
+            model.global_tags_mode = true;
+            model.active_pane = ActivePane::TagsList;
+            cmds.push(Command::FetchGlobalTags);
         }
-        Message::DuplicateBookmarksFetched(result) => match result {
-            Ok(bookmarks) => {
-                model.viewing_duplicates = true;
-                model.showing_starred = false;
-                model.initial = false;
-                if bookmarks.is_empty() {
-                    model.user_message = Some(UserMessage::info("no duplicate bookmarks found"));
-                    model.bookmark_items = BookmarkItems::default();
-                } else {
-                    model.bookmark_items = BookmarkItems::from(bookmarks);
-                }
-                model.sync_starred_markers();
-                model.active_pane = ActivePane::List;
+        Message::GlobalTagsFetched(tags, errors) => {
+            // Same "don't yank the user out of whatever they're doing"
+            // reasoning as the plain `TagsFetched` arm above - this just
+            // refreshes the data.
+            model.all_tag_items = tags.clone();
+            model.tag_items = TagItems::from(tags);
+
+            if !errors.is_empty() {
+                model.user_message = Some(UserMessage::error(&format!(
+                    "some databases couldn't be read: {}",
+                    errors.join("; ")
+                )));
             }
-            Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
+        }
+        Message::BookmarksForTagAcrossDatabasesFetched(results, errors) => {
+            model.showing_starred = false;
+            model.initial = false;
+
+            if results.is_empty() {
+                model.bookmark_items = BookmarkItems::default();
+                model.user_message = Some(UserMessage::info(
+                    "no bookmarks found for this tag in any database",
+                ));
+            } else {
+                let items: Vec<BookmarkItem> = results
+                    .into_iter()
+                    .map(|(db_name, db_path, bookmark)| {
+                        BookmarkItem::with_source_db(bookmark, db_name, db_path)
+                    })
+                    .collect();
+                model.bookmark_items = BookmarkItems::from(items);
+
+                if !errors.is_empty() {
+                    model.user_message = Some(UserMessage::error(&format!(
+                        "some databases couldn't be searched: {}",
+                        errors.join("; ")
+                    )));
+                }
+            }
+
+            model.sync_starred_markers();
+            model.active_pane = ActivePane::List;
+        }
+        Message::StartRenameTag => {
+            model.start_rename_selected_tag();
+        }
+        Message::RenameTagInputGotEvent(event) => {
+            model.rename_tag_input.handle_event(&event);
+            model.recompute_rename_tag_suggestions();
+        }
+        Message::RenameTagSuggestionNext => model.rename_tag_suggestion_next(),
+        Message::RenameTagSuggestionPrev => model.rename_tag_suggestion_previous(),
+        Message::AcceptRenameTagSuggestion => model.accept_selected_rename_tag_suggestion(),
+        Message::DismissRenameTagSuggestions => model.dismiss_rename_tag_suggestions(),
+        Message::RequestSaveRenameTag => {
+            if let Some(c) = model.request_save_rename_tag() {
+                cmds.push(c);
+            }
+        }
+        Message::RequestExitRenameTag => {
+            model.cancel_rename_tag();
+        }
+        Message::TagRenamed(old_name, new_name, result) => match result {
+            Ok(count) => {
+                let word = if count == 1 { "bookmark" } else { "bookmarks" };
+                model.user_message = Some(
+                    UserMessage::info(&format!(
+                        "renamed tag \"{old_name}\" to \"{new_name}\" ({count} {word} updated)!"
+                    ))
+                    .with_frames_left(3),
+                );
+                // Refresh the tag list (and, if it's currently showing
+                // bookmarks for a tag, that too) so names/counts reflect
+                // the rename immediately, rather than only on next visit.
+                if model.global_tags_mode {
+                    cmds.push(Command::FetchGlobalTags);
+                } else {
+                    cmds.push(Command::FetchTags);
+                }
+            }
+            Err(e) => {
+                model.user_message =
+                    Some(UserMessage::error(&format!("couldn't rename tag: {e}")));
+            }
         },
         Message::ShowStarred => {
             cmds.push(Command::FetchStarredBookmarks);
         }
         Message::StarredBookmarksFetched(result) => match result {
             Ok(bookmarks) => {
-                model.viewing_duplicates = false;
                 model.showing_starred = true;
                 model.initial = false;
                 if bookmarks.is_empty() {
@@ -370,6 +487,14 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 model.request_move_to_selected_database();
             }
         },
+        Message::SelectDatabaseByNumber(index) => {
+            // Same "select + confirm" shortcut as `SelectModeByNumber`,
+            // reusing `RequestSwitchDatabase`'s own switch-vs-move logic
+            // rather than duplicating it here.
+            model.db_list_state.select(Some(index));
+            let follow_up_cmds = update(model, Message::RequestSwitchDatabase);
+            cmds.extend(follow_up_cmds);
+        }
         Message::DatabaseSearchInputGotEvent(event) => {
             model.db_search_input.handle_event(&event);
             model.filter_databases();
@@ -408,10 +533,12 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         Message::ShowGlobalSearch => {
             model.global_search_mode = true;
             model.note_search_mode = false;
+            model.search_scope = SearchScope::All;
+            model.dismiss_search_tag_suggestions();
             model.search_input.reset();
             model.initial = false;
             model.active_pane = ActivePane::SearchInput;
-            cmds.push(Command::GlobalSearch(None));
+            cmds.push(Command::GlobalSearch(None, SearchScope::All));
         }
         Message::ToggleNoteSearch => {
             if model.note_search_mode {
@@ -424,6 +551,8 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             } else {
                 model.note_search_mode = true;
                 model.global_search_mode = false;
+                model.search_scope = SearchScope::All;
+                model.dismiss_search_tag_suggestions();
                 model.search_input.reset();
                 model.initial = false;
                 model.active_pane = ActivePane::SearchInput;
@@ -461,7 +590,6 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             }
         },
         Message::GlobalSearchFinished(results, errors) => {
-            model.viewing_duplicates = false;
             model.showing_starred = false;
             model.initial = false;
 
@@ -501,16 +629,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         }
         Message::BookmarkDeleted(uri, result) => match result {
             Ok(_) => {
-                if model.viewing_duplicates {
-                    // a bookmark that was part of a duplicate-title group
-                    // was just deleted; the remaining bookmark(s) that
-                    // shared that title may no longer be duplicates, so
-                    // refresh the list from the database instead of
-                    // just removing this one item locally.
-                    cmds.push(Command::FetchDuplicateBookmarks);
-                } else {
-                    model.remove_bookmark_by_uri(&uri);
-                }
+                model.remove_bookmark_by_uri(&uri);
                 model.marked_uris.remove(&uri);
                 model.sync_starred_markers();
                 model.user_message =
@@ -519,6 +638,24 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             Err(e) => {
                 model.user_message = Some(UserMessage::error(&format!(
                     "couldn't delete bookmark: {e}"
+                )));
+            }
+        },
+        Message::RequestDeleteAllVisible => {
+            model.request_delete_all_visible();
+        }
+        Message::BookmarksDeleted(result) => match result {
+            Ok(count) => {
+                model.bookmark_items = BookmarkItems::default();
+                model.marked_uris.clear();
+                let word = if count == 1 { "link" } else { "links" };
+                model.user_message = Some(
+                    UserMessage::info(&format!("deleted {count} {word}!")).with_frames_left(2),
+                );
+            }
+            Err(e) => {
+                model.user_message = Some(UserMessage::error(&format!(
+                    "couldn't delete all bookmarks: {e}"
                 )));
             }
         },
@@ -658,6 +795,10 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                         cmds.push(Command::DeleteBookmark(uri, target_db_path));
                         model.active_pane = ActivePane::List;
                     }
+                    PendingConfirmation::DeleteAllVisible { items, .. } => {
+                        cmds.push(Command::DeleteBookmarks(items));
+                        model.active_pane = ActivePane::List;
+                    }
                     PendingConfirmation::SaveEdit => {
                         let title = {
                             let t = model.edit_title_input.value().trim();
@@ -768,7 +909,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         Message::ContentCopiedToClipboard(result) => {
             if let Err(error) = result {
                 model.user_message = Some(UserMessage::error(&format!(
-                    "couldn't copy uri to clipboard: {error}"
+                    "couldn't copy url to clipboard: {error}"
                 )));
             } else {
                 model.user_message = Some(UserMessage::info("copied!").with_frames_left(1));

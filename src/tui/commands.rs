@@ -1,4 +1,4 @@
-use crate::persistence::SearchTerms;
+use crate::persistence::{SearchScope, SearchTerms};
 
 #[derive(Clone, Debug)]
 pub(super) enum Command {
@@ -6,11 +6,31 @@ pub(super) enum Command {
     OpenInBrowserIncognito(String),
     OpenMultipleInBrowser(Vec<String>),
     OpenMultipleInBrowserIncognito(Vec<String>),
-    SearchBookmarks(SearchTerms),
+    /// `scope` narrows the search down to just URLs, just descriptions
+    /// (titles), or just tags - `SearchScope::All` (the default) keeps
+    /// bmm's original "match any of them" behavior. Picked via the Alt+s
+    /// search-scope popup.
+    SearchBookmarks(SearchTerms, SearchScope),
     FetchAllBookmarks,
     FetchTags,
     FetchBookmarksForTag(String),
-    FetchDuplicateBookmarks,
+    /// Renames a tag - updating every bookmark that used it - either in
+    /// just the active database, or (`global: true`, when triggered from
+    /// the "all databases" Tags List view) across every local database at
+    /// once. If `new_name` already exists as a tag, the two are merged
+    /// rather than ending up with a duplicate.
+    RenameTag {
+        old_name: String,
+        new_name: String,
+        global: bool,
+    },
+    /// Fetches tag stats aggregated across every local database, for the
+    /// "all databases" Tags List view (`T`).
+    FetchGlobalTags,
+    /// Fetches every bookmark tagged with the given tag across every local
+    /// database - the "all databases" counterpart to `FetchBookmarksForTag`,
+    /// used when a tag is selected from the `T` (global) Tags List view.
+    FetchBookmarksForTagAcrossDatabases(String),
     FetchStarredBookmarks,
     FetchStarredUris,
     ToggleStar(String),
@@ -18,9 +38,15 @@ pub(super) enum Command {
         path: String,
         display_name: String,
     },
-    GlobalSearch(Option<SearchTerms>),
+    /// Same `scope` idea as `SearchBookmarks`, applied to every local
+    /// database at once.
+    GlobalSearch(Option<SearchTerms>, SearchScope),
     SearchNotes(Option<SearchTerms>),
     DeleteBookmark(String, Option<String>),
+    /// Deletes every bookmark in `items` - (uri, source database path,
+    /// `None` meaning the currently active database). Used for "delete all
+    /// currently listed bookmarks" (`D`).
+    DeleteBookmarks(Vec<(String, Option<String>)>),
     FetchNote(String),
     FetchNoteExists(String),
     SaveNote {

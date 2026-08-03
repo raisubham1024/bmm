@@ -5,7 +5,7 @@
 
 **Why use bmm?**
 
-Browser bookmarks get messy quickly. They're limited to a single browser, hard to search, and you don't know if a saved link is broken until you open it. `bmm` keeps all your bookmarks in one place, completely independent of any browser. You can instantly search for any bookmark from the terminal and open it in your default browser. It also lets you organize bookmarks into separate databases, add tags and notes, automatically check for broken links, and detect duplicate bookmarks. If you save a lot of links and want a fast, organized way to find, manage, and open them later, `bmm` is built for you.
+Browser bookmarks get messy quickly. They're limited to a single browser, hard to search, and you don't know if a saved link is broken until you open it. `bmm` keeps all your bookmarks in one place, completely independent of any browser. You can instantly search for any bookmark from the terminal and open it in your default browser. It also lets you organize bookmarks into separate databases, add tags and notes, and automatically check for broken links. If you save a lot of links and want a fast, organized way to find, manage, and open them later, `bmm` is built for you.
 
 `bmm` stores all your bookmarks and links on your own computer, so you can easily save, search, manage, and open them anytime. You can use simple terminal commands or the built-in terminal interface (TUI) to browse and manage your bookmarks in an easy way.
 
@@ -432,30 +432,32 @@ in TUI
 | --- | --- |
 |   s  |  show search box   |
 |  Enter   |   submit search query  OR if you leave search box empty then press Enter, it shows all bookmarks  |
-|   a  |   add a new bookmark (URI, title, tags)  |
-|  t   |   show Tags List View (when search is not active)  |
-|   d  |  show bookmarks that have a duplicate title   |
+|   a  |   add a new bookmark (URL, title, tags)  |
+|  t   |   show Tags List View for the active database (when search is not active)  |
+|  T   |   show Tags List View across all databases at once - tag counts are summed across databases, and results from picking a tag show which database each bookmark is from  |
 |   e  |   edit the title/tags of the bookmark under cursor  |
-|  E   |  edit the URI (as well as title/tags) of the bookmark under cursor   |
+|  E   |  edit the URL (as well as title/tags) of the bookmark under cursor   |
 |   n  |   add/edit a note for the bookmark under cursor (hidden)  |
 |   N  |  delete the note for the bookmark under cursor, if it  has one (asks for confirmation) |
 |   \*  |   toggle star on the bookmark under cursor  |
 |   S  |   show only starred bookmarks  |
 |   A  |  show/switch between databases   |
 |  z   |   search across all databases at once (results show  which database each bookmark is from) |
-|  D/delete   |   delete the bookmark under cursor (asks for confirmation)  |
-|  o   |   open URI in browser  |
-|  i   |   open URI in browser (incognito/private window)  |
+|  d/delete   |   delete the bookmark under cursor (asks for confirmation)  |
+|  D   |   delete every bookmark currently listed, all at once (asks for confirmation, and always shows exactly how many links will be deleted)  |
+|  o   |   open URL in browser  |
+|  i   |   open URL in browser (incognito/private window)  |
 |  O   |  open all listed bookmarks in browser (max 30; warns if more)   |
 |  I   |   open all listed bookmarks in browser, incognito/private  (max 30; warns if more) |
-|  y   |   copy selected URI  |
-|  Y   |    copy all the resulted URIs to system clipboard |
+|  y   |   copy selected URL  |
+|  Y   |    copy all the resulted URLs to system clipboard |
 
 
 |  Tags List View    |     |
 | --- | --- |
 |  /   |  show tag search input   |
-|   Enter  |  show bookmarks that are tagged with the one under cursor   |
+|   Enter  |  show bookmarks that are tagged with the one under cursor (across every database, if the Tags List View was opened with "T")   |
+|  Alt+e  |  rename the tag under cursor - updates every bookmark that used it (across every database, if opened with "T"); if the new name you type already exists as a tag, it's offered as a suggestion so you can merge into it instead of creating a duplicate; Ctrl+s to save, Esc to cancel   |
 
 
 |Edit Bookmark View     |     |

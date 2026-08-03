@@ -2,7 +2,7 @@ use super::DisplayError;
 use super::display::display_bookmarks;
 use crate::args::OutputFormat;
 use crate::persistence::DBError;
-use crate::persistence::{SearchTerms, SearchTermsError, get_bookmarks_by_query};
+use crate::persistence::{SearchScope, SearchTerms, SearchTermsError, get_bookmarks_by_query};
 use crate::tui::run_tui;
 use crate::tui::{AppTuiError, TuiContext};
 use sqlx::{Pool, Sqlite};
@@ -34,7 +34,7 @@ pub async fn search_bookmarks(
         return Ok(());
     }
 
-    let bookmarks = get_bookmarks_by_query(pool, &search_terms, limit)
+    let bookmarks = get_bookmarks_by_query(pool, &search_terms, limit, SearchScope::All)
         .await
         .map_err(SearchBookmarksError::CouldntGetBookmarksFromDB)?;
 

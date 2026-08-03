@@ -1,7 +1,7 @@
 use super::{commands::Command, common::*, message::Message};
 use crate::{
     domain::{SavedBookmark, TagStats},
-    persistence::SearchTerms,
+    persistence::{SearchScope, SearchTerms},
 };
 use ratatui::{
     style::Style,
@@ -26,9 +26,8 @@ pub(crate) enum RunningState {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum ModeOption {
     AllBookmarks,
-    Search,
+    ScopedSearch,
     Tags,
-    Duplicates,
     Starred,
     GlobalSearch,
     NoteSearch,
@@ -37,11 +36,10 @@ pub(super) enum ModeOption {
 }
 
 impl ModeOption {
-    pub(super) const ALL: [ModeOption; 9] = [
+    pub(super) const ALL: [ModeOption; 8] = [
         ModeOption::AllBookmarks,
-        ModeOption::Search,
+        ModeOption::ScopedSearch,
         ModeOption::Tags,
-        ModeOption::Duplicates,
         ModeOption::Starred,
         ModeOption::GlobalSearch,
         ModeOption::NoteSearch,
@@ -51,11 +49,10 @@ impl ModeOption {
 
     pub(super) fn label(&self) -> &'static str {
         match self {
-            ModeOption::AllBookmarks => "all bookmarks",
-            ModeOption::Search => "search this database",
-            ModeOption::Tags => "browse by tag",
-            ModeOption::Duplicates => "duplicate bookmarks",
-            ModeOption::Starred => "starred bookmarks",
+            ModeOption::AllBookmarks => "all bookmarks of current database",
+            ModeOption::ScopedSearch => "Separate searching mode",
+            ModeOption::Tags => "show all Tags",
+            ModeOption::Starred => "show Star/imp bookmarks",
             ModeOption::GlobalSearch => "search across all databases",
             ModeOption::NoteSearch => "search notes",
             ModeOption::Databases => "switch database",
@@ -65,10 +62,9 @@ impl ModeOption {
 
     pub(super) fn key_hint(&self) -> &'static str {
         match self {
-            ModeOption::AllBookmarks => "",
-            ModeOption::Search => "s",
+            ModeOption::AllBookmarks => "l",
+            ModeOption::ScopedSearch => "Alt+s",
             ModeOption::Tags => "t",
-            ModeOption::Duplicates => "d",
             ModeOption::Starred => "S",
             ModeOption::GlobalSearch => "z",
             ModeOption::NoteSearch => "Alt+n",
@@ -80,14 +76,63 @@ impl ModeOption {
     pub(super) fn into_message(self) -> Message {
         match self {
             ModeOption::AllBookmarks => Message::ShowAllBookmarks,
-            ModeOption::Search => Message::ShowView(ActivePane::SearchInput),
+            ModeOption::ScopedSearch => Message::ShowSearchScopePicker,
             ModeOption::Tags => Message::ShowView(ActivePane::TagsList),
-            ModeOption::Duplicates => Message::ShowDuplicates,
             ModeOption::Starred => Message::ShowStarred,
             ModeOption::GlobalSearch => Message::ShowGlobalSearch,
             ModeOption::NoteSearch => Message::ToggleNoteSearch,
             ModeOption::Databases => Message::ShowDatabaseList,
             ModeOption::Help => Message::ShowView(ActivePane::Help),
+        }
+    }
+}
+
+/// The list of options shown by the Alt+s search-scope popup - lets a
+/// search (plain "s" or cross-database "z") be narrowed down to just
+/// URLs, just descriptions (titles), or just tags, instead of matching
+/// any of them. Picking "tags" also pops up a live tag-name suggestions
+/// list under the search box, same idea as the Tags field in the Edit
+/// Bookmark screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum SearchScopeOption {
+    All,
+    Url,
+    Description,
+    Tag,
+}
+
+impl SearchScopeOption {
+    pub(super) const ALL: [SearchScopeOption; 4] = [
+        SearchScopeOption::All,
+        SearchScopeOption::Url,
+        SearchScopeOption::Description,
+        SearchScopeOption::Tag,
+    ];
+
+    pub(super) fn label(&self) -> &'static str {
+        match self {
+            SearchScopeOption::All => "search everything (URL, description, tags)",
+            SearchScopeOption::Url => "search URL only",
+            SearchScopeOption::Description => "search description/title only",
+            SearchScopeOption::Tag => "search tags only (with tag suggestions)",
+        }
+    }
+
+    pub(super) fn into_scope(self) -> SearchScope {
+        match self {
+            SearchScopeOption::All => SearchScope::All,
+            SearchScopeOption::Url => SearchScope::Url,
+            SearchScopeOption::Description => SearchScope::Description,
+            SearchScopeOption::Tag => SearchScope::Tag,
+        }
+    }
+
+    pub(super) fn from_scope(scope: SearchScope) -> Self {
+        match scope {
+            SearchScope::All => SearchScopeOption::All,
+            SearchScope::Url => SearchScopeOption::Url,
+            SearchScope::Description => SearchScopeOption::Description,
+            SearchScope::Tag => SearchScopeOption::Tag,
         }
     }
 }
@@ -283,6 +328,14 @@ impl From<&TagStats> for ListItem<'_> {
 #[derive(Debug, Clone)]
 pub(super) enum PendingConfirmation {
     DeleteBookmark(String, Option<String>),
+    /// Delete every bookmark currently listed - (uri, source database path)
+    /// pairs, same shape as `MoveBookmarks::items`, plus the count for the
+    /// confirmation message (kept separate so the message doesn't need to
+    /// re-derive it from `items.len()` in more than one place).
+    DeleteAllVisible {
+        items: Vec<(String, Option<String>)>,
+        count: usize,
+    },
     SaveEdit,
     DiscardEdit,
     SaveNote,
@@ -338,7 +391,22 @@ pub(super) struct Model {
     pub(super) tag_suggestion_selected: Option<usize>,
     pub(super) edit_original_title: Option<String>,
     pub(super) edit_original_tags: Option<String>,
-    pub(super) viewing_duplicates: bool,
+    /// Whether the Tags List view is currently showing tags aggregated
+    /// across every local database (`T`) rather than just the active
+    /// database's tags (`t`). Controls what `FetchTags`/`FetchGlobalTags`
+    /// command gets fired on refresh, and what selecting a tag does.
+    pub(super) global_tags_mode: bool,
+    /// Name of the tag currently being renamed (Alt+e from the Tags List
+    /// view), while `active_pane == ActivePane::RenameTag`.
+    pub(super) rename_tag_original: String,
+    pub(super) rename_tag_input: Input,
+    /// Existing tag names matching whatever's currently typed in
+    /// `rename_tag_input` - lets the user pick an already-saved tag to
+    /// merge into, instead of accidentally creating a near-duplicate
+    /// (same idea as `tag_suggestions` above, just matched against the
+    /// whole field instead of a comma-separated fragment).
+    pub(super) rename_tag_suggestions: Vec<String>,
+    pub(super) rename_tag_suggestion_selected: Option<usize>,
     pub(super) note_uri: String,
     pub(super) note_input: Input,
     pub(super) note_original: Option<String>,
@@ -359,6 +427,22 @@ pub(super) struct Model {
     pub(super) new_db_name_input: Input,
     pub(super) global_search_mode: bool,
     pub(super) note_search_mode: bool,
+    /// Which field(s) the search box currently matches against - `All`
+    /// unless narrowed with the Alt+s search-scope popup. Applies to both
+    /// the plain search ("s") and the cross-database search ("z").
+    pub(super) search_scope: SearchScope,
+    /// Which pane to return to when the search-scope popup is closed
+    /// (Esc) without picking anything - always `List` or `SearchInput`,
+    /// whichever it was opened from.
+    pub(super) pane_before_scope_picker: ActivePane,
+    pub(super) scope_picker_state: ListState,
+    /// Tag names matching whatever's currently being typed after the
+    /// last space in the search box, while `search_scope` is `Tag` -
+    /// same idea as `tag_suggestions` above, just space-delimited
+    /// (search terms are already space-separated) instead of comma-
+    /// delimited.
+    pub(super) search_tag_suggestions: Vec<String>,
+    pub(super) search_tag_suggestion_selected: Option<usize>,
     pub(super) mode_switcher_state: ListState,
     pub(super) pane_before_mode_switch: ActivePane,
     /// Bookmarks marked (Space) for a bulk move-to-database operation (`M`).
@@ -443,7 +527,11 @@ impl Model {
             tag_suggestion_selected: None,
             edit_original_title: None,
             edit_original_tags: None,
-            viewing_duplicates: false,
+            global_tags_mode: false,
+            rename_tag_original: String::new(),
+            rename_tag_input: Input::default(),
+            rename_tag_suggestions: vec![],
+            rename_tag_suggestion_selected: None,
             note_uri: String::new(),
             note_input: Input::default(),
             note_original: None,
@@ -459,6 +547,11 @@ impl Model {
             new_db_name_input: Input::default(),
             global_search_mode: false,
             note_search_mode: false,
+            search_scope: SearchScope::All,
+            pane_before_scope_picker: ActivePane::List,
+            scope_picker_state: ListState::default(),
+            search_tag_suggestions: vec![],
+            search_tag_suggestion_selected: None,
             mode_switcher_state: ListState::default(),
             pane_before_mode_switch: active_pane,
             marked_uris: HashSet::new(),
@@ -478,7 +571,9 @@ impl Model {
                 self.db_list_state.select_next()
             }
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_next(),
+            ActivePane::SearchScopePicker => self.scope_picker_state.select_next(),
             ActivePane::SearchInput => {}
+            ActivePane::RenameTag => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
             ActivePane::NewDatabaseName => {}
@@ -497,7 +592,9 @@ impl Model {
                 self.db_list_state.select_previous()
             }
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_previous(),
+            ActivePane::SearchScopePicker => self.scope_picker_state.select_previous(),
             ActivePane::SearchInput => {}
+            ActivePane::RenameTag => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
             ActivePane::NewDatabaseName => {}
@@ -516,7 +613,9 @@ impl Model {
                 self.db_list_state.select_first()
             }
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_first(),
+            ActivePane::SearchScopePicker => self.scope_picker_state.select_first(),
             ActivePane::SearchInput => {}
+            ActivePane::RenameTag => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
             ActivePane::NewDatabaseName => {}
@@ -534,7 +633,9 @@ impl Model {
                 self.db_list_state.select_last()
             }
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_last(),
+            ActivePane::SearchScopePicker => self.scope_picker_state.select_last(),
             ActivePane::SearchInput => {}
+            ActivePane::RenameTag => {}
             ActivePane::EditBookmark => {}
             ActivePane::Notes => {}
             ActivePane::NewDatabaseName => {}
@@ -549,6 +650,7 @@ impl Model {
             ActivePane::List => view,
             ActivePane::TagsList => view,
             ActivePane::TagSearchInput => view,
+            ActivePane::RenameTag => view,
             ActivePane::SearchInput => view,
             ActivePane::EditBookmark => view,
             ActivePane::Notes => view,
@@ -557,6 +659,7 @@ impl Model {
             ActivePane::NewDatabaseName => view,
             ActivePane::Confirm => view,
             ActivePane::ModeSwitcher => view,
+            ActivePane::SearchScopePicker => view,
         };
 
         match view {
@@ -571,15 +674,24 @@ impl Model {
                 // (which can change tag counts, or make a tag disappear
                 // entirely) wouldn't be reflected here until the list
                 // happened to be empty again (e.g. after restarting bmm).
+                //
+                // This is the plain "t" entry point (current database only)
+                // - make sure no leftover "all databases" mode from a
+                // previous visit via "T" carries over.
+                self.global_tags_mode = false;
                 Some(Command::FetchTags)
             }
             ActivePane::TagSearchInput => None,
+            ActivePane::RenameTag => None,
             ActivePane::SearchInput => {
                 // this is the plain "s" entry point into search - make sure
-                // no leftover global/note-search mode from a previous
-                // session carries over into what looks like a normal search
+                // no leftover global/note-search mode (or search scope) from
+                // a previous session carries over into what looks like a
+                // normal search
                 self.global_search_mode = false;
                 self.note_search_mode = false;
+                self.search_scope = SearchScope::All;
+                self.dismiss_search_tag_suggestions();
                 None
             }
             ActivePane::EditBookmark => None,
@@ -589,8 +701,10 @@ impl Model {
             ActivePane::NewDatabaseName => None,
             ActivePane::Confirm => None,
             ActivePane::ModeSwitcher => None,
+            ActivePane::SearchScopePicker => None,
         }
     }
+
 
     pub(super) fn go_back_or_quit(&mut self) -> Option<Command> {
         if self.terminal_too_small {
@@ -605,6 +719,7 @@ impl Model {
                 self.search_input.reset();
                 self.initial = false;
                 self.active_pane = ActivePane::List;
+                self.dismiss_search_tag_suggestions();
 
                 // Live search may have left the list showing filtered
                 // results from a query that was never confirmed with
@@ -613,15 +728,19 @@ impl Model {
                 let was_global = self.global_search_mode;
                 self.global_search_mode = false;
                 self.note_search_mode = false;
+                self.search_scope = SearchScope::All;
 
                 return Some(if was_global {
-                    Command::GlobalSearch(None)
+                    Command::GlobalSearch(None, SearchScope::All)
                 } else {
                     Command::FetchAllBookmarks
                 });
             }
             ActivePane::TagSearchInput => {
                 self.cancel_tag_search();
+            }
+            ActivePane::RenameTag => {
+                self.cancel_rename_tag();
             }
             ActivePane::EditBookmark => {
                 self.cancel_edit();
@@ -650,6 +769,9 @@ impl Model {
             ActivePane::ModeSwitcher => {
                 self.active_pane = self.pane_before_mode_switch;
             }
+            ActivePane::SearchScopePicker => {
+                self.active_pane = self.pane_before_scope_picker;
+            }
         };
 
         None
@@ -666,7 +788,7 @@ impl Model {
 
         if query.trim().is_empty() {
             return Some(if self.global_search_mode {
-                Command::GlobalSearch(None)
+                Command::GlobalSearch(None, self.search_scope)
             } else if self.note_search_mode {
                 Command::SearchNotes(None)
             } else {
@@ -676,11 +798,11 @@ impl Model {
 
         match SearchTerms::try_from(query) {
             Ok(terms) => Some(if self.global_search_mode {
-                Command::GlobalSearch(Some(terms))
+                Command::GlobalSearch(Some(terms), self.search_scope)
             } else if self.note_search_mode {
                 Command::SearchNotes(Some(terms))
             } else {
-                Command::SearchBookmarks(terms)
+                Command::SearchBookmarks(terms, self.search_scope)
             }),
             Err(_) => None,
         }
@@ -811,6 +933,37 @@ impl Model {
             self.pane_before_confirm = ActivePane::List;
             self.active_pane = ActivePane::Confirm;
         }
+    }
+
+    /// Asks to delete every bookmark currently listed in the List pane
+    /// (`D`) - whatever's currently on screen, be that all bookmarks, a
+    /// search/tag/starred result, or a global search/tag result. Does
+    /// nothing if the list is empty.
+    pub(super) fn request_delete_all_visible(&mut self) {
+        if self.active_pane != ActivePane::List {
+            return;
+        }
+
+        let items: Vec<(String, Option<String>)> = self
+            .bookmark_items
+            .items
+            .iter()
+            .map(|item| {
+                (
+                    item.bookmark.uri.clone(),
+                    item.source_db.as_ref().map(|(_, path)| path.clone()),
+                )
+            })
+            .collect();
+
+        if items.is_empty() {
+            return;
+        }
+
+        let count = items.len();
+        self.pending_confirmation = Some(PendingConfirmation::DeleteAllVisible { items, count });
+        self.pane_before_confirm = ActivePane::List;
+        self.active_pane = ActivePane::Confirm;
     }
 
     pub(super) fn remove_bookmark_by_uri(&mut self, uri: &str) {
@@ -1004,6 +1157,182 @@ impl Model {
         self.tag_suggestion_selected = None;
     }
 
+    //-------------------------------------//
+    //  search scope picker (Alt+s)         //
+    //-------------------------------------//
+
+    /// Opens the search-scope picker (Alt+s) - a small popup letting the
+    /// user restrict the search that's about to run (or is already
+    /// running, in the "z" all-databases case) to just URLs, just
+    /// descriptions (titles), or just tags. Works the same whether it's
+    /// opened from the List view (before typing anything) or from the
+    /// search box itself - `pane_before_scope_picker` remembers which,
+    /// so Esc can return to the right place without disturbing whatever
+    /// was already typed.
+    pub(super) fn open_search_scope_picker(&mut self) {
+        self.pane_before_scope_picker = self.active_pane;
+
+        let current = SearchScopeOption::from_scope(self.search_scope);
+        let index = SearchScopeOption::ALL
+            .iter()
+            .position(|o| *o == current)
+            .unwrap_or(0);
+        self.scope_picker_state.select(Some(index));
+
+        self.active_pane = ActivePane::SearchScopePicker;
+    }
+
+    /// Applies whichever scope is highlighted in the picker (Enter, or a
+    /// number key), then drops straight back into the search box -
+    /// re-running whatever's already typed against the new scope right
+    /// away, live, same as every other keystroke in the search box.
+    /// Picking "tags" also (re)fetches the current tag list, so the
+    /// tag-name suggestions popup has something to match against - the
+    /// active database's tags, or every database's tags at once if
+    /// this is a "z" (all-databases) search.
+    pub(super) fn confirm_search_scope_selection(&mut self) -> Vec<Command> {
+        let mut cmds = Vec::new();
+
+        let selected = self
+            .scope_picker_state
+            .selected()
+            .and_then(|i| SearchScopeOption::ALL.get(i).copied());
+
+        if let Some(option) = selected {
+            self.search_scope = option.into_scope();
+        }
+
+        self.active_pane = ActivePane::SearchInput;
+        self.dismiss_search_tag_suggestions();
+
+        if self.search_scope == SearchScope::Tag {
+            cmds.push(if self.global_search_mode {
+                Command::FetchGlobalTags
+            } else {
+                Command::FetchTags
+            });
+        }
+
+        if let Some(c) = self.live_search_command() {
+            cmds.push(c);
+        }
+
+        cmds
+    }
+
+    //-------------------------------------//
+    //  tag suggestions (search box, when   //
+    //  search_scope is Tag)                //
+    //-------------------------------------//
+
+    /// Recomputes `search_tag_suggestions` from whatever's currently
+    /// being typed after the last space in the search box, while
+    /// `search_scope` is `Tag` - same idea as `recompute_tag_suggestions`
+    /// for the Edit Bookmark screen's Tags field, just space-delimited
+    /// (search terms are already space-separated) instead of comma-
+    /// delimited.
+    pub(super) fn recompute_search_tag_suggestions(&mut self) {
+        if self.search_scope != SearchScope::Tag {
+            self.dismiss_search_tag_suggestions();
+            return;
+        }
+
+        // Owned from the start (rather than borrowing straight from
+        // `self.search_input`) so nothing here ties up a borrow of
+        // `self` past this line - keeps every early return below free
+        // to call the (whole-`self`) `dismiss_search_tag_suggestions`.
+        let value = self.search_input.value().to_string();
+        let mut parts: Vec<String> = value.split(' ').map(|s| s.to_string()).collect();
+        let fragment = parts.pop().unwrap_or_default().trim().to_string();
+
+        if fragment.is_empty() {
+            self.dismiss_search_tag_suggestions();
+            return;
+        }
+
+        let completed_lower: HashSet<String> = parts
+            .into_iter()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let fragment_lower = fragment.to_lowercase();
+
+        let mut matches: Vec<String> = self
+            .all_tag_items
+            .iter()
+            .map(|t| t.name.clone())
+            .filter(|name| {
+                let name_lower = name.to_lowercase();
+                name_lower.starts_with(&fragment_lower)
+                    && name_lower != fragment_lower
+                    && !completed_lower.contains(&name_lower)
+            })
+            .collect();
+
+        matches.sort();
+        matches.truncate(MAX_TAG_SUGGESTIONS);
+
+        self.search_tag_suggestion_selected = if matches.is_empty() { None } else { Some(0) };
+        self.search_tag_suggestions = matches;
+    }
+
+    pub(super) fn search_tag_suggestion_next(&mut self) {
+        if self.search_tag_suggestions.is_empty() {
+            return;
+        }
+
+        let len = self.search_tag_suggestions.len();
+        self.search_tag_suggestion_selected = Some(match self.search_tag_suggestion_selected {
+            Some(i) => (i + 1) % len,
+            None => 0,
+        });
+    }
+
+    pub(super) fn search_tag_suggestion_previous(&mut self) {
+        if self.search_tag_suggestions.is_empty() {
+            return;
+        }
+
+        let len = self.search_tag_suggestions.len();
+        self.search_tag_suggestion_selected = Some(match self.search_tag_suggestion_selected {
+            Some(0) | None => len - 1,
+            Some(i) => i - 1,
+        });
+    }
+
+    /// Splices the highlighted suggestion into the search box in place
+    /// of the fragment being typed (with a trailing space, ready for
+    /// the next tag), then clears the suggestion list - mirrors
+    /// `accept_selected_tag_suggestion`, just space- rather than comma-
+    /// joined.
+    pub(super) fn accept_selected_search_tag_suggestion(&mut self) {
+        let Some(i) = self.search_tag_suggestion_selected else {
+            return;
+        };
+        let Some(chosen) = self.search_tag_suggestions.get(i).cloned() else {
+            return;
+        };
+
+        let value = self.search_input.value().to_string();
+        let mut parts: Vec<String> = value
+            .split(' ')
+            .map(|s| s.to_string())
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        parts.pop();
+        parts.push(chosen);
+
+        let new_value = format!("{} ", parts.join(" "));
+        self.search_input = Input::new(new_value);
+        self.dismiss_search_tag_suggestions();
+    }
+
+    pub(super) fn dismiss_search_tag_suggestions(&mut self) {
+        self.search_tag_suggestions.clear();
+        self.search_tag_suggestion_selected = None;
+    }
+
     /// Replaces the in-progress fragment (after the last comma) in the
     /// tags input with the currently-highlighted suggestion, followed by
     /// ", " so the cursor's ready for the next tag - then clears the
@@ -1022,6 +1351,155 @@ impl Model {
         let new_value = format!("{}, ", completed.join(", "));
         self.edit_tags_input = Input::new(new_value);
         self.dismiss_tag_suggestions();
+    }
+
+    //----------------------------------//
+    //  tag rename (Alt+e in Tags List)  //
+    //----------------------------------//
+
+    /// Opens the rename-tag screen for whichever tag is currently
+    /// highlighted in the Tags List view (works from `TagsList` and
+    /// `TagSearchInput`, so a tag can be renamed right after narrowing
+    /// down to it with "/"). Pre-fills the input with the tag's current
+    /// name, so fixing a typo is just editing it in place rather than
+    /// retyping the whole tag.
+    pub(super) fn start_rename_selected_tag(&mut self) {
+        if self.active_pane != ActivePane::TagsList && self.active_pane != ActivePane::TagSearchInput {
+            return;
+        }
+
+        let Some(current_tag_index) = self.tag_items.state.selected() else {
+            return;
+        };
+        let Some(selected_tag) = self.tag_items.items.get(current_tag_index) else {
+            return;
+        };
+
+        self.rename_tag_original = selected_tag.name.clone();
+        self.rename_tag_input = Input::new(self.rename_tag_original.clone());
+        self.dismiss_rename_tag_suggestions();
+        self.active_pane = ActivePane::RenameTag;
+    }
+
+    /// Recomputes `rename_tag_suggestions` from whatever's currently typed
+    /// in `rename_tag_input` - called after every keystroke, so existing
+    /// tags pop up live as the user types, letting them pick one to merge
+    /// into instead of creating a near-duplicate tag by accident.
+    pub(super) fn recompute_rename_tag_suggestions(&mut self) {
+        let fragment = self.rename_tag_input.value().trim();
+
+        if fragment.is_empty() {
+            self.dismiss_rename_tag_suggestions();
+            return;
+        }
+
+        let fragment_lower = fragment.to_lowercase();
+        let original_lower = self.rename_tag_original.to_lowercase();
+
+        let mut matches: Vec<String> = self
+            .all_tag_items
+            .iter()
+            .map(|t| t.name.clone())
+            .filter(|name| {
+                let name_lower = name.to_lowercase();
+                name_lower.starts_with(&fragment_lower)
+                    && name_lower != fragment_lower
+                    && name_lower != original_lower
+            })
+            .collect();
+
+        matches.sort();
+        matches.truncate(MAX_TAG_SUGGESTIONS);
+
+        self.rename_tag_suggestion_selected = if matches.is_empty() { None } else { Some(0) };
+        self.rename_tag_suggestions = matches;
+    }
+
+    pub(super) fn rename_tag_suggestion_next(&mut self) {
+        if self.rename_tag_suggestions.is_empty() {
+            return;
+        }
+
+        let len = self.rename_tag_suggestions.len();
+        self.rename_tag_suggestion_selected = Some(match self.rename_tag_suggestion_selected {
+            Some(i) => (i + 1) % len,
+            None => 0,
+        });
+    }
+
+    pub(super) fn rename_tag_suggestion_previous(&mut self) {
+        if self.rename_tag_suggestions.is_empty() {
+            return;
+        }
+
+        let len = self.rename_tag_suggestions.len();
+        self.rename_tag_suggestion_selected = Some(match self.rename_tag_suggestion_selected {
+            Some(0) | None => len - 1,
+            Some(i) => i - 1,
+        });
+    }
+
+    pub(super) fn dismiss_rename_tag_suggestions(&mut self) {
+        self.rename_tag_suggestions.clear();
+        self.rename_tag_suggestion_selected = None;
+    }
+
+    /// Replaces the whole rename input with the currently-highlighted
+    /// suggestion (unlike `accept_selected_tag_suggestion`, there's no
+    /// comma-separated fragment to splice into - this field is always a
+    /// single tag name), then clears the suggestion list.
+    pub(super) fn accept_selected_rename_tag_suggestion(&mut self) {
+        let Some(i) = self.rename_tag_suggestion_selected else {
+            return;
+        };
+        let Some(chosen) = self.rename_tag_suggestions.get(i).cloned() else {
+            return;
+        };
+
+        self.rename_tag_input = Input::new(chosen);
+        self.dismiss_rename_tag_suggestions();
+    }
+
+    pub(super) fn cancel_rename_tag(&mut self) {
+        self.rename_tag_input.reset();
+        self.rename_tag_original.clear();
+        self.dismiss_rename_tag_suggestions();
+        self.active_pane = ActivePane::TagsList;
+    }
+
+    /// Validates and kicks off the actual rename (Ctrl+S). Returns `None`
+    /// (without a command) for an empty name, or when the name typed is
+    /// the same tag it started as - in the latter case this just quietly
+    /// closes the screen, same as pressing Esc, since there's nothing to
+    /// do. Deeper validation (tag name format) happens once the command
+    /// actually runs, so it can be reported the same way for both the
+    /// single- and all-databases cases.
+    pub(super) fn request_save_rename_tag(&mut self) -> Option<Command> {
+        if self.active_pane != ActivePane::RenameTag {
+            return None;
+        }
+
+        let new_name = self.rename_tag_input.value().trim().to_string();
+
+        if new_name.is_empty() {
+            self.user_message = Some(UserMessage::error("tag name can't be empty"));
+            return None;
+        }
+
+        if new_name.eq_ignore_ascii_case(&self.rename_tag_original) {
+            self.cancel_rename_tag();
+            return None;
+        }
+
+        let old_name = std::mem::take(&mut self.rename_tag_original);
+        let global = self.global_tags_mode;
+        self.cancel_rename_tag();
+
+        Some(Command::RenameTag {
+            old_name,
+            new_name,
+            global,
+        })
     }
 
     pub(super) fn cancel_edit(&mut self) {
@@ -1045,7 +1523,7 @@ impl Model {
         }
 
         if self.edit_is_new && self.edit_uri_input.value().trim().is_empty() {
-            self.user_message = Some(UserMessage::error("uri can't be empty"));
+            self.user_message = Some(UserMessage::error("url can't be empty"));
             return;
         }
 
@@ -1478,7 +1956,7 @@ impl Model {
         self.all_tag_items = vec![];
         self.starred_uris = HashSet::new();
         self.showing_starred = false;
-        self.viewing_duplicates = false;
+        self.global_tags_mode = false;
         self.marked_uris = HashSet::new();
         self.move_pending = vec![];
     }
@@ -1490,6 +1968,12 @@ impl Model {
                 Some(_) => format!("delete this bookmark (from another database)?\n\n{uri}"),
                 None => format!("delete this bookmark?\n\n{uri}"),
             },
+            Some(PendingConfirmation::DeleteAllVisible { count, .. }) => {
+                let word = if *count == 1 { "link" } else { "links" };
+                format!(
+                    "Warning: this will permanently delete ALL {count} currently listed {word} at once.\n\nAre you sure you want to delete these {count} {word}?"
+                )
+            }
             Some(PendingConfirmation::SaveEdit) => {
                 if self.edit_is_new {
                     let uri = self.edit_uri_input.value().trim();

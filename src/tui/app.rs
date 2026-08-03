@@ -5,6 +5,7 @@ use super::message::{Message, get_event_handling_msg};
 use super::model::*;
 use super::update::update;
 use super::view::view;
+use crate::persistence::SearchScope;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use sqlx::{Pool, Sqlite};
@@ -85,7 +86,7 @@ impl AppTui {
         match &context {
             TuiContext::Initial => {}
             TuiContext::Search(q) => {
-                initial_commands.push(Command::SearchBookmarks(q.clone()));
+                initial_commands.push(Command::SearchBookmarks(q.clone(), SearchScope::All));
             }
             TuiContext::Tags => {}
         }

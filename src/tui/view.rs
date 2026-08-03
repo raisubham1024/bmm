@@ -1,6 +1,7 @@
 use super::common::*;
 use super::help_content::HELP_SECTIONS;
-use super::model::{MessageKind, ModeOption, Model};
+use super::model::{MessageKind, ModeOption, Model, SearchScopeOption};
+use crate::persistence::SearchScope;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -33,6 +34,7 @@ pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
         }
         ActivePane::TagsList => render_tag_list_view(model, frame, false),
         ActivePane::TagSearchInput => render_tag_list_view(model, frame, true),
+        ActivePane::RenameTag => render_rename_tag_view(model, frame),
         ActivePane::EditBookmark => render_edit_bookmark_view(model, frame),
         ActivePane::Notes => render_notes_view(model, frame),
         ActivePane::DatabaseList => render_database_list_view(model, frame, false),
@@ -40,6 +42,7 @@ pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
         ActivePane::NewDatabaseName => render_new_database_name_view(model, frame),
         ActivePane::Confirm => render_confirm_view(model, frame),
         ActivePane::ModeSwitcher => render_mode_switcher_view(model, frame),
+        ActivePane::SearchScopePicker => render_search_scope_picker_view(model, frame),
     }
 }
 
@@ -164,6 +167,20 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                     Style::new().fg(COLOR_THREE),
                 ));
             }
+
+            if model.global_tags_mode {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    " all databases ",
+                    Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+                ));
+            }
+        }
+        ActivePane::RenameTag => {
+            header_components.push(Span::styled(
+                format!(" renaming tag \"{}\" ", model.rename_tag_original),
+                Style::new().bold().bg(TAGS_COLOR).fg(FG_COLOR),
+            ));
         }
         ActivePane::EditBookmark => {
             let text = if model.edit_is_new {
@@ -207,6 +224,12 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
         ActivePane::ModeSwitcher => {
             header_components.push(Span::styled(
                 " switch mode ",
+                Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR),
+            ));
+        }
+        ActivePane::SearchScopePicker => {
+            header_components.push(Span::styled(
+                " search scope ",
                 Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR),
             ));
         }
@@ -273,11 +296,19 @@ fn render_search_input(model: &Model, frame: &mut Frame, chunk: Rect) {
     let scroll = model.search_input.visual_scroll(width as usize);
 
     let title = if model.note_search_mode {
-        " search notes? "
-    } else if model.global_search_mode {
-        " search all databases? "
+        " search notes? ".to_string()
     } else {
-        " search query? "
+        let scope_label = match model.search_scope {
+            SearchScope::All => "",
+            SearchScope::Url => " [URL only]",
+            SearchScope::Description => " [description only]",
+            SearchScope::Tag => " [tags only]",
+        };
+        if model.global_search_mode {
+            format!(" search all databases?{scope_label} (Alt+s: scope) ")
+        } else {
+            format!(" search query?{scope_label} (Alt+s: scope) ")
+        }
     };
 
     let input = Paragraph::new(model.search_input.value())
@@ -353,7 +384,7 @@ fn render_bookmarks_details(model: &Model, frame: &mut Frame, chunk: Rect) {
         let maybe_bookmark_item = model.bookmark_items.items.get(selected);
         if let Some(bookmark_item) = maybe_bookmark_item {
             let mut details = format!(
-                r#"URI   : {}
+                r#"URL   : {}
 Title : {}
 Tags  : {}
 "#,
@@ -416,18 +447,27 @@ fn render_tag_details(model: &Model, frame: &mut Frame, chunk: Rect) {
 fn render_initial_view(model: &mut Model, frame: &mut Frame, search: bool) {
     match search {
         true => {
+            let suggestion_rows = search_tag_suggestion_box_height(model);
+            let mut constraints = vec![Constraint::Min(20), Constraint::Length(3)];
+            if suggestion_rows > 0 {
+                constraints.push(Constraint::Length(suggestion_rows));
+            }
+            constraints.push(Constraint::Length(1));
+
             let layout = Layout::default()
                 .direction(ratatui::layout::Direction::Vertical)
-                .constraints(vec![
-                    Constraint::Min(20),
-                    Constraint::Length(3),
-                    Constraint::Length(1),
-                ])
+                .constraints(constraints)
                 .split(frame.area());
 
             render_banner(model.terminal_dimensions.height, frame, layout[0]);
             render_search_input(model, frame, layout[1]);
-            render_status_line(model, frame, layout[2]);
+
+            let mut next = 2;
+            if suggestion_rows > 0 {
+                render_search_tag_suggestions_box(model, frame, layout[next]);
+                next += 1;
+            }
+            render_status_line(model, frame, layout[next]);
         }
         false => {
             let layout = Layout::default()
@@ -445,20 +485,32 @@ fn render_list_view(model: &mut Model, frame: &mut Frame, search: bool) {
     match model.bookmark_items.items.len() {
         0 => match search {
             true => {
+                let suggestion_rows = search_tag_suggestion_box_height(model);
+                let mut constraints = vec![
+                    Constraint::Length(2),
+                    Constraint::Min(18),
+                    Constraint::Length(3),
+                ];
+                if suggestion_rows > 0 {
+                    constraints.push(Constraint::Length(suggestion_rows));
+                }
+                constraints.push(Constraint::Length(1));
+
                 let layout = Layout::default()
                     .direction(ratatui::layout::Direction::Vertical)
-                    .constraints(vec![
-                        Constraint::Length(2),
-                        Constraint::Min(18),
-                        Constraint::Length(3),
-                        Constraint::Length(1),
-                    ])
+                    .constraints(constraints)
                     .split(frame.area());
 
                 render_header(model, frame, layout[0]);
                 render_bookmarks_list(model, frame, layout[1]);
                 render_search_input(model, frame, layout[2]);
-                render_status_line(model, frame, layout[3]);
+
+                let mut next = 3;
+                if suggestion_rows > 0 {
+                    render_search_tag_suggestions_box(model, frame, layout[next]);
+                    next += 1;
+                }
+                render_status_line(model, frame, layout[next]);
             }
             false => {
                 let layout = Layout::default()
@@ -477,22 +529,34 @@ fn render_list_view(model: &mut Model, frame: &mut Frame, search: bool) {
         },
         _ => match search {
             true => {
+                let suggestion_rows = search_tag_suggestion_box_height(model);
+                let mut constraints = vec![
+                    Constraint::Length(2),
+                    Constraint::Min(11),
+                    Constraint::Length(7),
+                    Constraint::Length(3),
+                ];
+                if suggestion_rows > 0 {
+                    constraints.push(Constraint::Length(suggestion_rows));
+                }
+                constraints.push(Constraint::Length(1));
+
                 let layout = Layout::default()
                     .direction(ratatui::layout::Direction::Vertical)
-                    .constraints(vec![
-                        Constraint::Length(2),
-                        Constraint::Min(11),
-                        Constraint::Length(7),
-                        Constraint::Length(3),
-                        Constraint::Length(1),
-                    ])
+                    .constraints(constraints)
                     .split(frame.area());
 
                 render_header(model, frame, layout[0]);
                 render_bookmarks_list(model, frame, layout[1]);
                 render_bookmarks_details(model, frame, layout[2]);
                 render_search_input(model, frame, layout[3]);
-                render_status_line(model, frame, layout[4]);
+
+                let mut next = 4;
+                if suggestion_rows > 0 {
+                    render_search_tag_suggestions_box(model, frame, layout[next]);
+                    next += 1;
+                }
+                render_status_line(model, frame, layout[next]);
             }
             false => {
                 let layout = Layout::default()
@@ -662,6 +726,57 @@ fn render_tag_suggestions_box(model: &Model, frame: &mut Frame, chunk: Rect) {
     frame.render_stateful_widget(list, chunk, &mut list_state);
 }
 
+/// Same idea as `tag_suggestion_box_height`, for the search box's own
+/// tag-name suggestions (shown while `search_scope` is `Tag`) - kept as
+/// a separate function since the surrounding chrome (banner/list/status
+/// vs. header/uri/title/tags/status) differs per call site.
+fn search_tag_suggestion_box_height(model: &Model) -> u16 {
+    if model.search_scope != SearchScope::Tag || model.search_tag_suggestions.is_empty() {
+        return 0;
+    }
+
+    let wanted = model.search_tag_suggestions.len() as u16 + 2;
+
+    // A conservative floor for everything else on screen (header/banner,
+    // the search box itself, the status line, and a few rows kept free
+    // for the bookmarks list) - not pixel-exact per call site, just
+    // enough to keep the suggestions box from ever crowding out
+    // everything else at bmm's minimum supported terminal size.
+    let fixed_chrome = 2 + 3 + 1 + 4;
+    let available = model.terminal_dimensions.height.saturating_sub(fixed_chrome);
+
+    wanted.min(available)
+}
+
+/// Tags matching whatever's currently being typed after the last space
+/// in the search box, shown as an ordinary box directly under it - only
+/// rendered while `search_scope` is `Tag` and there are live matches
+/// (see `search_tag_suggestion_box_height`). Mirrors
+/// `render_tag_suggestions_box`, just backed by the search box's own
+/// suggestion fields.
+fn render_search_tag_suggestions_box(model: &Model, frame: &mut Frame, chunk: Rect) {
+    let items: Vec<ListItem> = model
+        .search_tag_suggestions
+        .iter()
+        .map(|name| ListItem::new(name.as_str()).style(Style::new().fg(TAGS_COLOR)))
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(PRIMARY_COLOR))
+                .title(" matching tags (\u{2191}/\u{2193}, Enter to pick) ")
+                .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
+        )
+        .highlight_symbol("> ")
+        .highlight_style(Style::new().bg(PRIMARY_COLOR).fg(FG_COLOR));
+
+    let mut list_state = ListState::default();
+    list_state.select(model.search_tag_suggestion_selected);
+
+    frame.render_stateful_widget(list, chunk, &mut list_state);
+}
+
 fn render_edit_uri_field(model: &Model, frame: &mut Frame, chunk: Rect) {
     if !model.edit_uri_editable {
         let p = Paragraph::new(model.edit_uri_input.value())
@@ -669,7 +784,7 @@ fn render_edit_uri_field(model: &Model, frame: &mut Frame, chunk: Rect) {
             .block(
                 Block::bordered()
                     .border_style(Style::default().fg(COLOR_TWO))
-                    .title(" URI (read-only; press Esc then 'E' to edit it) ")
+                    .title(" URL (read-only; press Esc then 'E' to edit it) ")
                     .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR)),
             );
         frame.render_widget(p, chunk);
@@ -684,9 +799,9 @@ fn render_edit_uri_field(model: &Model, frame: &mut Frame, chunk: Rect) {
     let scroll = model.edit_uri_input.visual_scroll(width as usize);
 
     let title = if focused {
-        " URI (Tab: switch, Ctrl+s: save, Esc: cancel) "
+        " URL (Tab: switch, Ctrl+s: save, Esc: cancel) "
     } else {
-        " URI "
+        " URL "
     };
 
     let p = Paragraph::new(model.edit_uri_input.value())
@@ -768,6 +883,123 @@ fn render_edit_tags_field(model: &Model, frame: &mut Frame, chunk: Rect) {
     }
 }
 
+/// Renaming a tag (Alt+e from the Tags List view) - keeps the tag list
+/// visible above (same "list stays visible, editing happens below it"
+/// layout as `render_edit_bookmark_view`), with the new-name field and any
+/// matching-tag suggestions underneath it.
+fn render_rename_tag_view(model: &mut Model, frame: &mut Frame) {
+    let suggestion_rows = rename_tag_suggestion_box_height(model);
+    let fields_height = 3 + suggestion_rows;
+
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(8),
+            Constraint::Length(fields_height),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+    render_tag_list(model, frame, layout[1]);
+    render_rename_tag_fields(model, frame, layout[2], suggestion_rows);
+    render_status_line(model, frame, layout[3]);
+}
+
+/// 0 if there's nothing to show; otherwise enough rows for every current
+/// suggestion plus its border (2) - clamped the same way as
+/// `tag_suggestion_box_height` above.
+fn rename_tag_suggestion_box_height(model: &Model) -> u16 {
+    if model.rename_tag_suggestions.is_empty() {
+        return 0;
+    }
+
+    let wanted = model.rename_tag_suggestions.len() as u16 + 2;
+
+    // header(2) + rename field(3) + status(1) + a floor of 4 rows kept
+    // free for the tags list above.
+    let fixed_chrome = 2 + 3 + 1 + 4;
+    let available = model.terminal_dimensions.height.saturating_sub(fixed_chrome);
+
+    wanted.min(available)
+}
+
+fn render_rename_tag_fields(
+    model: &Model,
+    frame: &mut Frame,
+    chunk: Rect,
+    suggestion_rows: u16,
+) {
+    let mut constraints = vec![Constraint::Length(3)];
+    if suggestion_rows > 0 {
+        constraints.push(Constraint::Length(suggestion_rows));
+    }
+
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(constraints)
+        .split(chunk);
+
+    render_rename_tag_field(model, frame, layout[0]);
+
+    if suggestion_rows > 0 {
+        render_rename_tag_suggestions_box(model, frame, layout[1]);
+    }
+}
+
+fn render_rename_tag_field(model: &Model, frame: &mut Frame, chunk: Rect) {
+    // keep 2 for borders and 1 for cursor
+    let width = chunk.width.max(3) - 3;
+    let scroll = model.rename_tag_input.visual_scroll(width as usize);
+
+    let title = format!(
+        " Rename \"{}\" to (Ctrl+s: save, Esc: cancel) ",
+        model.rename_tag_original
+    );
+
+    let p = Paragraph::new(model.rename_tag_input.value())
+        .style(Style::default().fg(PRIMARY_COLOR))
+        .scroll((0, scroll as u16))
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(PRIMARY_COLOR))
+                .title(title)
+                .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
+        );
+    frame.render_widget(p, chunk);
+
+    let cursor_x = model.rename_tag_input.visual_cursor().max(scroll) - scroll + 1;
+    frame.set_cursor_position((chunk.x + cursor_x as u16, chunk.y + 1));
+}
+
+/// Existing tags matching whatever's currently being typed, shown directly
+/// under the rename field - picking one merges the renamed tag into it
+/// instead of creating a near-duplicate (same idea as
+/// `render_tag_suggestions_box` above, just for a single-tag field).
+fn render_rename_tag_suggestions_box(model: &Model, frame: &mut Frame, chunk: Rect) {
+    let items: Vec<ListItem> = model
+        .rename_tag_suggestions
+        .iter()
+        .map(|name| ListItem::new(name.as_str()).style(Style::new().fg(TAGS_COLOR)))
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(PRIMARY_COLOR))
+                .title(" matching tags - pick one to merge into it (\u{2191}/\u{2193}, Enter to pick) ")
+                .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
+        )
+        .highlight_symbol("> ")
+        .highlight_style(Style::new().bg(PRIMARY_COLOR).fg(FG_COLOR));
+
+    let mut list_state = ListState::default();
+    list_state.select(model.rename_tag_suggestion_selected);
+
+    frame.render_stateful_widget(list, chunk, &mut list_state);
+}
+
 fn render_notes_view(model: &mut Model, frame: &mut Frame) {
     let layout = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
@@ -837,21 +1069,33 @@ fn render_database_list_view(model: &mut Model, frame: &mut Frame, search: bool)
     let items: Vec<ListItem> = model
         .filtered_dbs
         .iter()
-        .map(|name| {
+        .enumerate()
+        .map(|(i, name)| {
+            // Only the first 9 databases get a number prefix, since there's
+            // no single digit key left to jump to entries past that - they
+            // stay reachable with j/k/Enter as before, just without the
+            // number shortcut.
+            let prefix = if i < 9 {
+                format!("{}. ", i + 1)
+            } else {
+                String::new()
+            };
             if name == &model.active_db_name {
                 ListItem::new(Line::styled(
-                    format!("* {name} (active)"),
+                    format!("* {prefix}{name} (active)"),
                     Style::new().fg(PRIMARY_COLOR).bold(),
                 ))
             } else {
-                ListItem::new(Line::from(format!("  {name}")))
+                ListItem::new(Line::from(format!("  {prefix}{name}")))
             }
         })
         .collect();
 
     let title = match model.db_list_purpose {
-        DbListPurpose::Switch => " databases (Enter: switch, /: search, C: create new, Esc: back) ",
-        DbListPurpose::Move => " move to database (Enter: choose, /: search, Esc: cancel) ",
+        DbListPurpose::Switch => {
+            " databases (1-9/Enter: switch, /: search, C: create new, Esc: back) "
+        }
+        DbListPurpose::Move => " move to database (1-9/Enter: choose, /: search, Esc: cancel) ",
     };
 
     let list = List::new(items)
@@ -1032,14 +1276,22 @@ fn render_mode_switcher_view(model: &mut Model, frame: &mut Frame) {
 
     let items: Vec<ListItem> = ModeOption::ALL
         .iter()
-        .map(|mode| {
+        .enumerate()
+        .map(|(i, mode)| {
             let label = mode.label();
             let hint = mode.key_hint();
+            // Numbered 1-8 so the mode can be opened directly by pressing
+            // that digit, without moving the selection down to it first -
+            // `ModeOption::ALL` currently has 8 entries so every one gets
+            // a single-digit number (this stays correct even if entries
+            // are added/removed later, since it's driven off the actual
+            // list length rather than a hardcoded count).
+            let number = i + 1;
             let line = if hint.is_empty() {
-                Line::from(format!("  {label}"))
+                Line::from(format!("  {number}. {label}"))
             } else {
                 Line::from(vec![
-                    Span::from(format!("  {label} ")),
+                    Span::from(format!("  {number}. {label} ")),
                     Span::styled(format!("[{hint}]"), Style::new().fg(COLOR_THREE)),
                 ])
             };
@@ -1051,13 +1303,50 @@ fn render_mode_switcher_view(model: &mut Model, frame: &mut Frame) {
         .block(
             Block::bordered()
                 .border_style(Style::default().fg(PRIMARY_COLOR))
-                .title(" switch mode (Enter: select, Alt+m/Esc: close) ")
+                .title(" switch mode (1-8/Enter: select, Alt+m/Esc: close) ")
                 .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
         )
         .highlight_style(Style::new().bg(PRIMARY_COLOR).fg(FG_COLOR))
         .direction(ListDirection::TopToBottom);
 
     frame.render_stateful_widget(list, layout[1], &mut model.mode_switcher_state);
+
+    render_status_line(model, frame, layout[2]);
+}
+
+fn render_search_scope_picker_view(model: &mut Model, frame: &mut Frame) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(6),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+
+    let items: Vec<ListItem> = SearchScopeOption::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, option)| {
+            let label = option.label();
+            let number = i + 1;
+            ListItem::new(Line::from(format!("  {number}. {label}")))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::bordered()
+                .border_style(Style::default().fg(PRIMARY_COLOR))
+                .title(" search scope (1-4/Enter: select, Alt+s/Esc: close) ")
+                .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
+        )
+        .highlight_style(Style::new().bg(PRIMARY_COLOR).fg(FG_COLOR))
+        .direction(ListDirection::TopToBottom);
+
+    frame.render_stateful_widget(list, layout[1], &mut model.scope_picker_state);
 
     render_status_line(model, frame, layout[2]);
 }

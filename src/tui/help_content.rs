@@ -55,11 +55,11 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
         rows: &[
             row!(
                 "search",
-                "Search your bookmarks by title, URI,\nor tags as you type - see \"s\" under\nBookmarks List View below."
+                "Search your bookmarks by title, URL,\nor tags as you type - see \"s\" under\nBookmarks List View below. Press\nAlt+s to narrow a search down to just\nURLs, just descriptions (titles), or\njust tags - typing a tag then shows\nlive tag-name suggestions, same as\nthe Tags field when adding a\nbookmark. Works for a normal search\nand for the cross-database search\n(\"z\") alike."
             ),
             row!(
                 "Tags",
-                "Organise bookmarks with comma-\nseparated tags; browse the Tags List\nView to see every tag and how many\nbookmarks use it. While typing tags\nin the add/edit screen, matching\nalready-saved tags pop up live below\nthe fragment you're typing - pick one\nwith Up/Down + Enter, or just keep\ntyping to ignore them."
+                "Organise bookmarks with comma-\nseparated tags; browse the Tags List\nView to see every tag and how many\nbookmarks use it (\"t\" for the active\ndatabase, \"T\" for every database at\nonce), and rename a tag everywhere\nit's used with \"Alt+e\" (see Tags List\nView below). While typing tags in the\nadd/edit screen, matching already-\nsaved tags pop up live below the\nfragment you're typing - pick one with\nUp/Down + Enter, or just keep typing\nto ignore them."
             ),
             row!(
                 "Notes",
@@ -68,10 +68,6 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             row!(
                 "Starring",
                 "Mark bookmarks as favourites with\n\"*\", then filter down to just your\nstarred bookmarks with \"S\"."
-            ),
-            row!(
-                "Duplicate detection",
-                "Find bookmarks that share the same\ntitle with \"d\", so you can clean\nthem up."
             ),
             row!(
                 "Multiple databases",
@@ -83,7 +79,7 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!(
                 "Importing",
-                "Bring in existing bookmarks from a\nbrowser export or another tool.\nSupported file formats: HTML\n(Netscape-Bookmark-file-1, exported\nby Firefox/Chrome/etc), JSON, and\nplain TXT (one URI per line). Use\n\"bmm import <file>\" from the CLI\n(a --dry-run flag lets you preview\nfirst)."
+                "Bring in existing bookmarks from a\nbrowser export or another tool.\nSupported file formats: HTML\n(Netscape-Bookmark-file-1, exported\nby Firefox/Chrome/etc), JSON, and\nplain TXT (one URL per line). Use\n\"bmm import <file>\" from the CLI\n(a --dry-run flag lets you preview\nfirst)."
             ),
             row!(
                 "Checking for dead links",
@@ -137,7 +133,7 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
         ],
     },
     HelpSection {
-        title: "bmm has nine views",
+        title: "bmm has ten views",
         rows: &[
             row!(
                 "Bookmarks List",
@@ -171,6 +167,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
                 "Mode Switcher",
                 "A quick menu that jumps straight to any\nother view."
             ),
+            row!(
+                "Search Scope Picker",
+                "A quick popup (Alt+s) that narrows a\nsearch down to just URLs, just\ndescriptions, or just tags."
+            ),
             row!("Help", "This view - the list you're reading now."),
         ],
     },
@@ -180,7 +180,7 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             row!("?", "Open or close this Help view."),
             row!(
                 "Alt+m",
-                "Open the Mode Switcher, to jump to any\nview: all bookmarks, search, tags,\nduplicates, starred, search across all\ndatabases, note search, databases, or\nhelp. Works from anywhere, even while\nyou're typing. Press it again (or\nEsc/q) to close it."
+                "Open the Mode Switcher, to jump to any\nview: all bookmarks, the search scope\npicker, tags, starred, search across\nall databases, note search, databases,\nor help. Works from anywhere, even\nwhile you're typing. Press it again\n(or Esc/q) to close it."
             ),
             row!(
                 "Alt+n",
@@ -199,6 +199,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
                 "Check for a newer bmm binary, and\ninstall it at every location bmm is\nfound on PATH if one's available\n(shows \"Already up to date\" or\n\"Update available\" accordingly).\nWorks from anywhere, even while\ntyping. Only supported on Linux\n(x86_64) and Android (aarch64) right\nnow. Same as running \"bmm update\"\nfrom the CLI."
             ),
             row!(
+                "Alt+s",
+                "Open the Search Scope Picker, to\nnarrow the search box down to just\nURLs, just descriptions (titles), or\njust tags - works for a normal search\n(\"s\") and the cross-database search\n(\"z\") alike. Opens from the Bookmarks\nList view or from the search box\nitself."
+            ),
+            row!(
                 "Esc / q",
                 "Go back a step, clear the current\ninput, or (from the main list) exit\nbmm."
             ),
@@ -212,17 +216,21 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
         title: "Bookmarks List View",
         rows: &[
             row!(
+                "l",
+                "Show all bookmarks of the current\ndatabase (clears any active search,\ntag filter, or starred filter)."
+            ),
+            row!(
                 "s",
-                "Open the search box. Results update as\nyou type - no need to press Enter."
+                "Open the search box. Results update as\nyou type - no need to press Enter.\nPress Alt+s first (or while typing)\nto narrow the search to just URLs,\njust descriptions, or just tags."
             ),
             row!("a", "Add a new bookmark (link, title, tags)."),
             row!(
                 "t / Tab",
-                "Open the Tags List View (only while\nyou are not already searching)."
+                "Open the Tags List View for the active\ndatabase only (only while you are not\nalready searching)."
             ),
             row!(
-                "d",
-                "Show only bookmarks that share a title\nwith another one (duplicates)."
+                "T",
+                "Open the Tags List View for every\ndatabase at once - tag counts are\nsummed across databases, and picking a\ntag shows matching bookmarks from every\ndatabase (each result shows which\ndatabase it's from)."
             ),
             row!(
                 "e",
@@ -248,7 +256,7 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!(
                 "z",
-                "Search every database at once. Each\nresult shows which database it's\nfrom."
+                "Search every database at once. Each\nresult shows which database it's\nfrom. Press Alt+s to narrow this to\njust URLs, just descriptions, or just\ntags too."
             ),
             row!(
                 "Space",
@@ -263,8 +271,12 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
                 "Move every marked bookmark to another\ndatabase (asks first) - mark them\nfirst with Space."
             ),
             row!(
-                "Delete / D",
+                "Delete / d",
                 "Delete the bookmark under your cursor\n(asks first)."
+            ),
+            row!(
+                "D",
+                "Delete every bookmark currently listed,\nall at once (asks first, and always\nshows exactly how many links will be\ndeleted)."
             ),
             row!("o", "Open the link under your cursor in\nyour browser."),
             row!(
@@ -288,12 +300,41 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
         rows: &[
             row!(
                 "Enter",
-                "Lock in the search text and close the\nbox (leave it empty + Enter to see\nevery bookmark)."
+                "Lock in the search text and close the\nbox (leave it empty + Enter to see\nevery bookmark). If tag-name\nsuggestions are showing, picks the\nhighlighted one instead."
             ),
-            row!("Esc", "Cancel and close the search box."),
+            row!(
+                "Esc",
+                "Cancel and close the search box. If\ntag-name suggestions are showing,\ndismisses them instead, without\nclosing the box."
+            ),
             row!(
                 "Down / Up",
-                "Move the highlighted bookmark while\nyou keep typing."
+                "Move the highlighted bookmark while\nyou keep typing. If tag-name\nsuggestions are showing (scope is\n\"tags only\"), moves the highlighted\nsuggestion instead."
+            ),
+            row!(
+                "Alt+s",
+                "Open the Search Scope Picker, to\nnarrow this search down to just URLs,\njust descriptions, or just tags."
+            ),
+        ],
+    },
+    HelpSection {
+        title: "Search Scope Picker View (opened with Alt+s)",
+        rows: &[
+            row!(
+                "j / k / Down / Up",
+                "Move the highlighted scope."
+            ),
+            row!("g / G", "Jump to the first / last scope."),
+            row!(
+                "1-4",
+                "Jump straight to and pick that scope,\nwithout moving the selection down to\nit first."
+            ),
+            row!(
+                "Enter",
+                "Apply the highlighted scope and drop\nback into the search box, re-running\nwhatever's already typed against the\nnew scope right away. Picking \"tags\nonly\" also pops up live tag-name\nsuggestions as you type - matched\nagainst the active database's tags,\nor every database's tags at once if\nthis is a \"z\" (all-databases) search."
+            ),
+            row!(
+                "Alt+s / Esc / q",
+                "Close without changing the scope."
             ),
         ],
     },
@@ -304,6 +345,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             row!(
                 "Enter",
                 "Show every bookmark that has the tag\nunder your cursor."
+            ),
+            row!(
+                "Alt+e",
+                "Rename the tag under your cursor -\nevery bookmark that used it gets\nupdated too (across every database, if\nyou got here via \"T\"). Type the new\nname, then Ctrl+s to save (or Esc to\ncancel). If you type the name of a tag\nthat already exists, it shows up as a\nsuggestion - picking it merges the two\ntags together instead of leaving you\nwith a near-duplicate."
             ),
         ],
     },
