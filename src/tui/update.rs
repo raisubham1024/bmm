@@ -82,6 +82,40 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                     Some(UserMessage::error(&format!("update check failed: {e}")));
             }
         },
+        Message::RequestFetchDescription => {
+            let uri = model.edit_uri_input.value().trim().to_string();
+            if uri.is_empty() {
+                model.user_message =
+                    Some(UserMessage::error("can't fetch a description: URL is empty"));
+            } else if model.fetching_description {
+                // a fetch is already in flight; ignore repeated presses
+            } else {
+                model.fetching_description = true;
+                model.user_message =
+                    Some(UserMessage::info("fetching description...").with_frames_left(1));
+                cmds.push(Command::FetchDescription(uri));
+            }
+        }
+        Message::DescriptionFetched(result) => {
+            model.fetching_description = false;
+            match result {
+                Ok(Some(description)) => {
+                    model.edit_title_input = tui_input::Input::new(description);
+                    model.user_message =
+                        Some(UserMessage::info("description fetched!").with_frames_left(2));
+                }
+                Ok(None) => {
+                    // No description found - stay quiet rather than
+                    // falling back to the title or showing a message,
+                    // matching `bmm fetch`'s behavior on the CLI side.
+                    model.user_message = None;
+                }
+                Err(e) => {
+                    model.user_message =
+                        Some(UserMessage::error(&format!("couldn't fetch description: {e}")));
+                }
+            }
+        }
         Message::GoToNextListItem => model.select_next_list_item(),
         Message::GoToPreviousListItem => model.select_previous_list_item(),
         Message::OpenInBrowser => {

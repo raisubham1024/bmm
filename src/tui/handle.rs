@@ -377,6 +377,20 @@ pub(super) async fn handle_command(
                 let _ = event_tx.try_send(Message::UpdateCheckFinished(result));
             });
         }
+        Command::FetchDescription(uri) => {
+            tokio::spawn(async move {
+                let uri = crate::domain::normalize_uri_scheme(uri);
+                let result = crate::cli::fetch_page_metadata(
+                    &uri,
+                    crate::cli::DEFAULT_FETCH_TIMEOUT_SECS,
+                )
+                .await
+                .map(|metadata| metadata.description)
+                .map_err(|e| e.to_string());
+
+                let _ = event_tx.try_send(Message::DescriptionFetched(result));
+            });
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::cli::{
     CheckBookmarksError, CouldntGetDetailsViaEditorError, DeleteBookmarksError, DeleteTagsError,
-    ImportError, ListBookmarksError, ListTagsError, NotesCommandError,
+    FetchDescriptionError, ImportError, ListBookmarksError, ListTagsError, NotesCommandError,
     ParsingTempFileContentError, RenameTagError, SaveBookmarkError, SaveBookmarksError,
     SearchBookmarksError, ShowBookmarkError,
 };
@@ -44,6 +44,8 @@ pub enum AppError {
     CouldntDeleteBookmarks(#[from] DeleteBookmarksError),
     #[error("couldn't check bookmarks: {0}")]
     CouldntCheckBookmarks(#[from] CheckBookmarksError),
+    #[error("couldn't fetch website description: {0}")]
+    CouldntFetchDescription(#[from] FetchDescriptionError),
     #[error("couldn't handle notes command: {0}")]
     CouldntHandleNotesCommand(#[from] NotesCommandError),
     #[error("couldn't set starred status: {0}")]
@@ -181,6 +183,12 @@ impl AppError {
                 SearchBookmarksError::CouldntGetBookmarksFromDB(_) => Some(3000),
                 SearchBookmarksError::CouldntDisplayResults(_) => Some(3001),
                 SearchBookmarksError::CouldntRunTui(e) => Some(e.code()),
+            },
+            AppError::CouldntFetchDescription(e) => match e {
+                FetchDescriptionError::CouldntBuildHttpClient(_) => Some(1500),
+                FetchDescriptionError::CouldntFetchPage(..) => Some(1501),
+                FetchDescriptionError::NonSuccessStatus(..) => None,
+                FetchDescriptionError::CouldntReadBody(..) => Some(1502),
             },
         }
     }

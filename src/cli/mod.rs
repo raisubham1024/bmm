@@ -1,6 +1,7 @@
 mod check;
 mod delete;
 mod display;
+mod fetch;
 mod import;
 mod list;
 mod notes;
@@ -14,6 +15,7 @@ mod update;
 pub use check::*;
 pub use delete::*;
 pub use display::*;
+pub use fetch::*;
 pub use import::*;
 pub use list::*;
 pub use notes::*;

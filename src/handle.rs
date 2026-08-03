@@ -189,6 +189,8 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
 
         BmmCommand::Notes { uri, print } => handle_notes_command(&pool, uri, print).await?,
 
+        BmmCommand::Fetch { uri, timeout } => fetch_description(&uri, timeout).await?,
+
         BmmCommand::Update => handle_update_command().await?,
 
         BmmCommand::Tui => run_tui(&pool, TuiContext::Initial, db_name.clone()).await?,

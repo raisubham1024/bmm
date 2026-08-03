@@ -231,6 +231,20 @@ pub enum BmmCommand {
     },
     /// Check for (and install) a newer bmm binary at every location bmm is found on PATH
     Update,
+    /// Fetch and print a website's description (the text a search engine
+    /// would usually show underneath the link)
+    Fetch {
+        /// URI of the website to fetch the description of
+        #[arg(value_name = "URI")]
+        uri: String,
+        /// Number of seconds to wait for a response before giving up
+        #[arg(
+            long = "timeout",
+            value_name = "INTEGER",
+            default_value_t = 8
+        )]
+        timeout: u16,
+    },
     /// Open bmm's TUI
     Tui,
 }
@@ -494,6 +508,13 @@ command      : Add/edit/view a note for a bookmark
 uri          : {uri}
 print only   : {print}
 "#,
+            ),
+            BmmCommand::Fetch { uri, timeout } => format!(
+                r#"
+command      : Fetch website description
+URI          : {uri}
+timeout (s)  : {timeout}
+"#
             ),
             BmmCommand::Tui => r#"
 command      : Open TUI

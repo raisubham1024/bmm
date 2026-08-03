@@ -71,4 +71,8 @@ pub(super) enum Command {
     BackupDatabases,
     RestoreDatabases,
     CheckForUpdate,
+    /// Fetches `uri`'s page metadata (Alt+F, from the Title field of the
+    /// add/edit bookmark screen) so its description can be auto-filled
+    /// into the Title field.
+    FetchDescription(String),
 }

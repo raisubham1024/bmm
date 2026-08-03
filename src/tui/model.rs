@@ -458,6 +458,10 @@ pub(super) struct Model {
     /// for scrolling (nothing is ever visibly "selected"), the same way
     /// `ListState` is used to scroll the other list-based views.
     pub(super) help_table_state: TableState,
+    /// Whether a description fetch (Alt+F, from the Title field of the
+    /// add/edit bookmark screen) is currently in flight - guards against
+    /// firing a second fetch while one's still running.
+    pub(super) fetching_description: bool,
 }
 
 /// Splits a tags-input value like "foo, bar, ba" into the already-
@@ -558,6 +562,7 @@ impl Model {
             move_pending: vec![],
             move_last_uris: vec![],
             help_table_state: TableState::default(),
+            fetching_description: false,
         }
     }
 

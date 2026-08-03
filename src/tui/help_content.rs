@@ -389,6 +389,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!("Ctrl+s", "Save your changes (asks first)."),
             row!(
+                "(Title field) Alt+F",
+                "Fetch the bookmark's URL and fill the\nTitle field with its description (or\nits page title, if it has no\ndescription) - same as\n\"bmm fetch <URI>\" on the command line."
+            ),
+            row!(
                 "Esc",
                 "Cancel editing (asks first if you\nchanged something). If the tag-\nsuggestion box is open, this closes\nit instead - press Esc again to\nactually cancel."
             ),

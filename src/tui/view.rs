@@ -830,7 +830,7 @@ fn render_edit_title_field(model: &Model, frame: &mut Frame, chunk: Rect) {
     let scroll = model.edit_title_input.visual_scroll(width as usize);
 
     let title = if focused {
-        " Title (Tab: switch, Ctrl+s: save, Esc: cancel) "
+        " Title (Tab: switch, Alt+F: fetch description, Ctrl+s: save, Esc: cancel) "
     } else {
         " Title "
     };

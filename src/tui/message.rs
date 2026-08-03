@@ -142,6 +142,14 @@ pub enum Message {
     DatabasesRestored(Result<(usize, std::path::PathBuf), String>),
     RequestCheckForUpdate,
     UpdateCheckFinished(Result<crate::self_update::UpdateOutcome, String>),
+    /// Fired by Alt+F while the Title field is focused in the add/edit
+    /// bookmark screen - fetches the URL's page and auto-fills the Title
+    /// field with its description.
+    RequestFetchDescription,
+    /// `Ok(Some(description))` fills the Title field; `Ok(None)` means the
+    /// page was reachable but had no description to use, in which case
+    /// nothing happens.
+    DescriptionFetched(Result<Option<String>, String>),
 }
 
 pub enum UrlsOpenedResult {
@@ -401,6 +409,17 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                             if key_event.modifiers.contains(KeyModifiers::CONTROL) =>
                         {
                             Some(Message::RequestSaveBookmarkEdit)
+                        }
+                        // Alt+F, while the Title field is focused, fetches
+                        // the bookmark's URL and auto-fills the Title
+                        // field with the page's description, if it has one
+                        // - the TUI counterpart to `bmm fetch <URI>`. If
+                        // there's no description, nothing happens.
+                        KeyCode::Char('f') | KeyCode::Char('F')
+                            if key_event.modifiers.contains(KeyModifiers::ALT)
+                                && model.edit_focus == EditField::Title =>
+                        {
+                            Some(Message::RequestFetchDescription)
                         }
                         _ => Some(Message::EditFieldGotEvent(event)),
                     },
