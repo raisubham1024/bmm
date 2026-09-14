@@ -39,7 +39,7 @@ I tried many different ways to save and organize bookmarks, but the GitHub repos
   apt update && apt upgrade
   ```
   &nbsp;
-- now time to download `bmm`, [Click here to download BMM for Android](https://github.com/raisubham1024/bmm/releases/download/final/bmm-android-aarch64)
+- now time to download `bmm`, [Click here to download BMM for Android](https://github.com/raisubham1024/bmm/releases/tag/final)
 
 **💁 Whether you're using Android or another device, you can download the appropriate version for your device or operating system from the GitHub Releases page.** => [Click here to see BMM for different devices](https://github.com/raisubham1024/bmm/releases/tag/final) 
 
