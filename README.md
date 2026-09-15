@@ -1,31 +1,32 @@
+
+
+
 <p align="center">
   <h1 align="center">bmm</h1>
+&nbsp;
 
-</p>
-
-**Why use bmm?**
-
-Browser bookmarks get messy quickly. They're limited to a single browser, hard to search, and you don't know if a saved link is broken until you open it. `bmm` keeps all your bookmarks in one place, completely independent of any browser. You can instantly search for any bookmark from the terminal and open it in your default browser. It also lets you organize bookmarks into separate databases, add tags and notes, and automatically check for broken links. If you save a lot of links and want a fast, organized way to find, manage, and open them later, `bmm` is built for you.
+**🧙 Why use bmm?**
+---
+Browser bookmarks get messy quickly. They're limited to a single browser, hard to search, and you don't know if a saved link is broken until you open it. `bmm` keeps all your bookmarks in one place, completely independent of any browser. You can instantly search for any bookmark from the terminal and open it in your default browser. It also lets you organize bookmarks into separate databases, add tags and notes, automatically check for broken links, and detect duplicate bookmarks. If you save a lot of links and want a fast, organized way to find, manage, and open them later, `bmm` is built for you.
 
 `bmm` stores all your bookmarks and links on your own computer, so you can easily save, search, manage, and open them anytime. You can use simple terminal commands or the built-in terminal interface (TUI) to browse and manage your bookmarks in an easy way.
 
+All TUI features you can see at the bottom of this page , see this section or click here to directly jump to that section  [[#TUI Reference Manual]]
 
-![tui-2](https://github.com/user-attachments/assets/a3dc5fb7-d258-461e-86b5-f2498dfbd4dc)
+&nbsp;
 
----
 
 🤔 Motivation
 ---
 
 I tried many different ways to save and organize bookmarks, but the GitHub repository **bmm** by **dhth** was the one I liked the most. It inspired me because of its simplicity and approach to bookmark management. However, I wanted a few additional features that would make it easier for everyday users. My goal is to create something that is simple to use, works well across different devices, and is easily accessible from Android phones as well. This project is inspired by **bmm**, but it is built with my own ideas and improvements. Finally, I'd like to thank my friend, whose encouragement motivated me to renew this project.
 
----
-
+&nbsp;
 
 💾 Installation
 ---
 
-### for Android
+## for Android
 - first download `termux` from github [Click here to download Termux](https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_arm64-v8a.apk) OR you can download the appropriate release for your device or operating system from the GitHub Releases page (even it available in Playstore but that version is outdated, that's why download it from github)
 - give permission to install 3rd party app (if asked). in installation time mobile give you warning but trust me everythings safe, if this security pop up then click on `install anyway`
 - once install open Termux
@@ -39,446 +40,330 @@ I tried many different ways to save and organize bookmarks, but the GitHub repos
   apt update && apt upgrade
   ```
   &nbsp;
-- now time to download `bmm`, [Click here to download BMM for Android](https://github.com/raisubham1024/bmm/releases/tag/final)
+- now time to download `bmm`, [Click here to download BMM for Android](https://github.com/raisubham1024/bmm/releases/download/final/bmm-android-aarch64)
 
-**💁 Whether you're using Android or another device, you can download the appropriate version for your device or operating system from the GitHub Releases page.** => [Click here to see BMM for different devices](https://github.com/raisubham1024/bmm/releases/tag/final) 
+💁 Whether you're using Android or another device, you can download the appropriate version for your device or operating system from the GitHub Releases page => [Click here to see BMM for different devices](https://github.com/raisubham1024/bmm/releases/tag/final) 
 
----
+&nbsp;
+&nbsp;
+&nbsp;
+## for Linux
+- download this file "bmm-linux-x86_64" from this link [click here](https://github.com/raisubham1024/bmm/releases/tag/final)
+- rename that file 'bmm-linux-x86_64' to **bmm**
+- move that file to this location `~/usr/bin` as a superuser. (so you can directly access this tool to any location)
+- now run `bmm` command, it's working now.
 
-💁 My Suggestion for normal users
----
-To avoid the complexity of commands, you can use the `bmm tui` command to open the Terminal User Interface (TUI). It provides a simple and user-friendly experience, making bookmark management easy for everyone.
 
-All TUI features you can see at the bottom of this page , see this section or click here to directly jump to that section  [[#TUI Reference Manual]]
-
----
+&nbsp;
+&nbsp;
+&nbsp;
 
 
-⚡️ Usage
----
+## for other system
+
+- first install `rust` and `git` in your system
+- then, install though this command (⏳️ it takes 5-10 min)
+  ```bash
+   cargo install --git https://github.com/raisubham1024/bmm.git
+  ```
+  &nbsp;
+- now run `bmm` command, it's working now.
+
+&nbsp;
+&nbsp;
+&nbsp;
+
+# 💁 Let's learn
+
+
+first open it by command `bmm` and press enter.
+*after that command, The screen you see is a default which is called a **Search mode** *
+
+> ℹ️ if you are on different mode and want to open a search mode again, press `s` (for search mode)
+
+&nbsp;
+## first understand that interface of bmm
+
+- **Search Mode:**  
+    When you run the `bmm` command, the interface you see is called **Search Mode**.
+    
+    - You can search for your saved bookmarks/links.
+        
+    - You can edit or delete bookmarks/links.
+        
+    - If you press `Enter` on an empty search, it shows **all your saved bookmarks/links**.
+        
+    - In **All Bookmarks**, you can see the **total number of saved links**.
+        
+- **Using `Esc` in Search Mode:**
+    
+    - When you are in Search Mode, press `Esc` to see **all your saved bookmarks**.
+        
+    - Press `Esc` again to **exit BMM**.
+        
+    - You can also press **`q`** to **quit/exit BMM**.
+        
+- **`Alt + m` – Show All Modes:**  
+    Press `Alt + m` to see **all available modes/options** in BMM.
+    
+    - Each mode has a **number**.
+        
+    - Pressing that number takes you **directly to that mode**.
+        
+- **Switch Database:**  
+    In the `Alt + m` menu, there is a **Switch Database** mode.
+    
+    - You can use it to create and switch between **different databases** for different types of links.
+        
+    - For example, you can have separate databases for study links, work links, or personal links.
+        
+    - **Important:** Even if you switch to another database, when you close BMM and open it again, it will start with the default **`bmm` database**.
+
+&nbsp;
+
+## 📌 1️⃣ create, 2️⃣ modify, 3️⃣ search, 4️⃣ delete a bookmark/link
+
+&nbsp
+
+### 1️⃣ create a bookmark
+let's create a bookmark of any link
+- first open bmm by `bmm` command
+- press enter to show all bookmarks (currently we don't have any so it show blank)
+- lets add the new links by pressing `a`
+- you see this window, where you add 'URL', 'Description', and 'Tags'
+  <img width="1460" height="246" alt="Image" src="https://github.com/user-attachments/assets/9180c060-fa1d-4a29-a246-a9b2b060ac06" />
+&nbsp;
+#### LET'S UNDERSTAND ABOUT THESE SECTIONS  :
+
+> ℹ️ to switch between section : 
+> press `Tab` to next section (top to bottom) and press `Shift + Tab` to previous section (bottom to top)
+
+> 💁 if you want to erase something in section try this shorcut to done quickly
+
+| Key        | Description                              |
+| ---------- | ---------------------------------------- |
+| `Ctrl + u` | Deletes the whole line before the cursor |
+| `Ctrl + k` | Deletes the whole line after the cursor  |
+
+&nbsp;
+&nbsp;
+&nbsp;
+
+### 1. URL section
+here you copy paste the link of your website (for example : `https://wikipedia.com` )
+ℹ️ even if you type directly like this  `wikipedia.com` and it directly save as `https://wikipedia.com`
+
+💁 No matter where the link comes from, a website, Instagram, Reddit, a video, a photo, or any other platform, **a link is a link**. Just paste or manually type it into the URL section.
+
+**now, press `Tab` to switch to 'Title section'**
+
+&nbsp;
+&nbsp;
+### 2. Title section
+here you can manually type description about of the link.
+
+OR
+
+every website have there description, so if you want to extract that description of that website, just press `Alt + f` and it automatically extract / fetch that description and automatically write in 'Title section' (it takes 3-4 seconds to extract description)
+
+**now, press `Tab` to switch to 'Tags section'**
+
+&nbsp;
+&nbsp;
+
+### 3. Tags section
+here you can give a Tag name. 
+Tags let you group your bookmarks into categories (like "work", "coding", "reading"), making it easy to quickly search or filter bookmarks by topic, which you can see in Tag mode (empty search press enter to see all bookmarks then press `t` to see all tags).
+
+> ℹ️ you can add multiple tags, so it mean a single link contain more than one tag.
+
+&nbsp;
+- let give that link `<link>` , some tags 
+- give tags like `knowledge` and `wiki` seprated by comma `,`
+
+&nbsp;
+**Now press `Ctrl + s` to save the bookmark/link. it asks `y` for 'yes' and 'n' for no**
+
+&nbsp;
+&nbsp;
+&nbsp;
+### 2️⃣ Modify a bookmark
+- run `bmm` command, you see search mode
+- without typing anything, just press `enter` to see all bookmarks
+- choose that link by up arrow or down arrow
+- if you want to modify "Description + Tags" for this press `e` OR if you want to modify all section "URL + Description + Tags" then press `E`
+- after that `ctrl + s` for save the modification.
+
+> ℹ️ I built these two separate functionalities, `e` and `E`, to prevent you from accidentally modifying the URL.
+
+&nbsp;
+&nbsp;
+&nbsp;
+
+### 3️⃣ Search a bookmark
+
+There is lots of way to get your result (it's better to understand all ways)  :
+
+### (default) Search mode
+you saved multiple bookmarks and now it's time to search it.
+when you open `bmm` tool, default search mode you see. in that search mode whatever you type it searches on URL + Description + Tags. 
+so if you search like `wiki demo rust` so suppose you saved a bookmark, where **wiki** word in 'Description',  **demo** word in Tags , **rust** word in 'URL' (no matter the search order)
+
+> ℹ️ search order doesn't matter, if any link/bookmark contain that word, you get the result
+
+> ℹ️ half searching functionality. suppose you wanna search `mountain knowledge` (which contain large size words), so instead of typing every single word, you can half search it like this  `mou kno` (you get the same result)  😉
+
+
+
+
+
+----
+
+
+### BMM Reference Manual
 
 ```text
-Usage: bmm [OPTIONS] <COMMAND>
+#you can see these views by pressing "Alt + m" in a TUI mode (bmm tui)
 
-Commands:
-  import    Import bookmarks from various sources
-  delete    Delete bookmarks
-  list      List bookmarks based on several kinds of queries
-  save      Save/update a bookmark
-  save-all  Save/update multiple bookmarks
-  search    Search bookmarks by matching over terms
-  show      Show bookmark details
-  tags      Interact with tags
-  check     Check bookmarks for broken/dead links
-  notes     Add, edit, or view a note attached to a bookmark
-  tui       Open bmm's TUI
-  help      Print this message or the help of the given subcommand(s)
-
-Options:
-      --db-path <STRING>  Override bmm's database location (default: <DATA_DIR>/bmm/bmm.db)
-      --debug             Output debug information without doing anything
-  -h, --help              Print help (see more with '--help')
+1. all bookmarks of current database [l]
+2. Separate searching mode [Alt+s]
+3. show all Tags [t]
+4. show Star/imp bookmarks [S]
+5. search across all databases [z]
+6. search notes [Alt+n]
+7. switch database [A]
+8. help [?]
 ```
 
+| key     | Description                       |
+| ------- | --------------------------------- |
+| Alt + m | to switch between different modes |
 
-## Let's learn
+---
 
-there is 2 way 
-1. [[#TUI]] (recommended)
-2. [[#CLI]]
+**General**
 
-### TUI
-first open it by command `bmm tui` 
-
-*after that command, The screen you see is a default which is called a **Search mode** *
-ℹ️ if you are on different mode and want to open a search mode again, press `s` (for search mode)
+> [!info] again reminder 💁
+> when you open `bmm` tool, default you see a search mode, so these 'key' not work you have to switch to different mode or you do these things
+> - let empty the search box and press enter OR press 'Esc', both do the same things it show you list of saved bookmarks of bmm
+>   
+>   now you can use these key bindings 👇️
 
 
-#### first understand that TUI (terminal User Interface) of bmm
+
+| key            | Description                                                                          |
+| -------------- | ------------------------------------------------------------------------------------ |
+| ?              | show/hide help view                                                                  |
+| Esc            | one step back to previous mode 💁 2 times pressing 'Esc' also exit from the bmm tool |
+| q              | exit from the bmm tool                                                               |
+| Down arrow / j | go down in a list                                                                    |
+| Up arrow / k   | go up in a list                                                                      |
+
+---
+
+**Bookmarks related**
+
+| key      | Description                                                                                                |
+| -------- | ---------------------------------------------------------------------------------------------------------- |
+| s        | show search box                                                                                            |
+| Enter    | submit search query  OR if you leave search box empty then press Enter, it shows all bookmarks             |
+| a        | add a new bookmark (URL, title, tags)                                                                      |
+| t        | show Tags List View (when search is not active)                                                            |
+| T        | show Tags List View across all databases                                                                   |
+| d        | delete the selected bookmark/link                                                                          |
+| D        | delete all the resulted bookmarks/links                                                                    |
+| e        | edit the title/tags of the bookmark under cursor                                                           |
+| E        | edit the URL (as well as title/tags) of the bookmark under cursor                                          |
+| n        | add/edit a note for the bookmark under cursor (hidden)                                                     |
+| N        | delete the note for the bookmark under cursor, if it  has one (asks for confirmation)                      |
+| \*       | toggle star on the bookmark under cursor                                                                   |
+| S        | show only starred bookmarks                                                                                |
+| A        | show/switch between databases                                                                              |
+| z        | search across all databases at once (results show  which database each bookmark is from)                   |
+| D/delete | delete the selected bookmark  (asks for confirmation)                                                      |
+| o        | open URL in browser                                                                                        |
+| i        | open URL in browser (incognito/private window)  `🤧 not works on Android`                                  |
+| O        | open all listed bookmarks in browser (max 30; warns if more) `🤧 not works on Android`                     |
+| I        | open all listed bookmarks in browser, incognito/private  (max 30; warns if more) `🤧 not works on Android` |
+| y        | copy selected URL                                                                                          |
+| Y        | copy all the resulted URLs to system clipboard                                                             |
+
+
+> [!tip] Tip
+> Links won't open directly in incognito on Android. Press `y` to copy the link, then paste manually into incognito. Use this workaround until the issue is resolved.
+
+
+---
+
+**Tags List View**
 
 
 > [!info] 
-> Contents
-
-
-- after running a command `bmm tui` the interface you see is called "search mode", where you can search, edit, delete the bookmarks/links and all you can see all saved links by just without writing something in search mode just press `enter` 
-- when you are in search mode ,  press 'Esc' (Escape key) to switch to "Normal mode", where you can directly play with other functionalities like 'Databases, tags, etc'
-- in normal mode
-
-
-let's play with it :
-
-1. let's save one bookmark/link in bmm
-   - press 'a'  (you see )
-```bash
-#let's save one bookmark/link in bmm
-press `a` to crera
-
-```
-
-
-### CLI
-
-
-⌨ CLI mode
----
-
-`bmm` allows every action it supports to be performed via its CLI. As such, it
-can be easily integrated with other search tools (eg.
-[Alfred](https://www.alfredapp.com/), [fzf](https://github.com/junegunn/fzf),
-etc.)
-
-![cli](https://github.com/user-attachments/assets/f8493e7c-8286-4fa4-8d49-6f34b5c5044b)
-
-### Importing existing bookmarks
-
-`bmm` allows importing bookmarks from various sources. It supports the following
-input formats:
-
-- HTML (These are bookmark files exported by browsers like Firefox, Chrome, etc,
-  in the NETSCAPE-Bookmark-file-1 format.)
-- JSON
-- TXT
-
-```bash
-bmm import firefox.html
-bmm import bookmarks.json --dry-run
-
-# overwrite already saved attributes (title and tags) while importing
-bmm import bookmarks.txt --reset-missing-details
-
-# ignore errors related to bookmark title and tags
-# if title is too long, it'll be trimmed, some invalid tags will be corrected
-bmm import bookmarks.txt --ignore-attribute-errors
-```
-
-<details><summary> An example HTML file</summary>
-
-```html
-<!DOCTYPE NETSCAPE-Bookmark-file-1>
-<!-- This is an automatically generated file.
-     It will be read and overwritten.
-     DO NOT EDIT! -->
-<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'none'; img-src data: *; object-src 'none'"></meta>
-<TITLE>Bookmarks</TITLE>
-<H1>Bookmarks Menu</H1>
-
-<DL><p>
-    <DT><H3 ADD_DATE="1736450822" LAST_MODIFIED="1739920697" PERSONAL_TOOLBAR_FOLDER="true">Bookmarks Toolbar</H3>
-    <DL><p>
-        <DT><H3 ADD_DATE="1739896938" LAST_MODIFIED="1739920670">productivity</H3>
-        <DL><p>
-            <DT><H3 ADD_DATE="1739896992" LAST_MODIFIED="1739920767">crates</H3>
-            <DL><p>
-                <DT><A HREF="https://crates.io/crates/sqlx" ADD_DATE="1739897020" LAST_MODIFIED="1739897041" ICON_URI="https://crates.io/favicon.ico" TAGS="crates,rust">sqlx - crates.io: Rust Package Registry</A>
-            </DL><p>
-            <DT><A HREF="https://github.com/dhth/omm" ADD_DATE="1739920615" LAST_MODIFIED="1739920646" ICON_URI="https://github.com/fluidicon.png" TAGS="productivity,tools">GitHub - dhth/omm: on-my-mind: a keyboard-driven task manager for the command line</A>
-            <DT><A HREF="https://github.com/dhth/hours" ADD_DATE="1739920661" LAST_MODIFIED="1739920670" ICON_URI="https://github.com/fluidicon.png" TAGS="productivity,tools">GitHub - dhth/hours: A no-frills time tracking toolkit for command line nerds</A>
-        </DL><p>
-        <DT><A HREF="https://github.com/dhth/bmm" ADD_DATE="1739920697" LAST_MODIFIED="1739920739" ICON_URI="https://github.com/fluidicon.png" TAGS="tools">GitHub - dhth/bmm: get to your bookmarks in a flash</A>
-    </DL><p>
-</DL>
-```
-</details>
-
-<details><summary> An example JSON file</summary>
-
-```json
-[
-  {
-    "uri": "https://github.com/dhth/bmm",
-    "title": null,
-    "tags": "tools,bookmarks"
-  },
-  {
-    "uri": "https://github.com/dhth/omm",
-    "title": "on-my-mind: a keyboard-driven task manager for the command line",
-    "tags": null
-  }
-]
-```
-</details>
-
-<details><summary> An example TXT file</summary>
-
-```text
-https://github.com/dhth/bmm
-https://github.com/dhth/omm
-https://github.com/dhth/hours
-```
-</details>
-
-### Saving/updating a bookmark
-
-```bash
-# save a new URI
-bmm save https://github.com/dhth/bmm
-
-# save a new URI with title and tags
-bmm save https://github.com/dhth/omm \
-    --title 'a keyboard-driven task manager for the command line' \
-    --tags 'tools,productivity'
-
-# update the title of a previously saved bookmark
-bmm save https://github.com/dhth/bmm \
-    --title 'yet another bookmarking tool'
-
-# append to the tags of a previously saved bookmark
-bmm save https://github.com/dhth/omm \
-    --tags 'task-manager'
-
-# use your editor to provide details
-bmm save https://github.com/dhth/bmm -e
-
-# mark a bookmark as starred/favorite while saving it
-bmm save https://github.com/dhth/bmm --star
-```
-
-Note: if you leave out the scheme (eg. `github.com/dhth/bmm` instead of
-`https://github.com/dhth/bmm`), `bmm` assumes `https://` by default.
-
-### Saving/updating several bookmarks at a time
-
-```bash
-# save/update multiple bookmarks via arguments
-bmm save \
-    'https://github.com/dhth/bmm' \
-    'https://github.com/dhth/omm' \
-    --tags 'cli,bookmarks'
-
-# save/update multiple bookmarks via stdin
-cat << EOF | bmm save --tags tools --reset-missing-details -s
-https://github.com/dhth/bmm
-https://github.com/dhth/omm
-https://github.com/dhth/hours
-EOF
-```
-
-### Listing bookmarks based on several queries
-
-`bmm` allows listing bookmarks based on queries on bookmark uri/title/tags. The
-first two are pattern matched, while the last is matched exactly.
-
-```bash
-bmm list --uri 'github.com' \
-    --title 'command line' \
-    --tags 'tools,productivity' \
-    --format json
-```
-
-### Searching bookmarks by terms
-
-Sometimes you want to search for bookmarks without being very granular. The
-`search` command allows you to do so. It accepts a list of terms, and will
-return bookmarks where all of the terms are matched over any attribute or tag
-belonging to a bookmark. You can also open the results in `bmm`'s TUI.
-
-```bash
-# search bookmarks based on search terms
-bmm search cli rust tool bookmarks --format delimited
-
-# open search results in bmm's TUI
-bmm search cli rust tool bookmarks --tui
-```
-
-### Show bookmark details
-
-```bash
-bmm show 'https://github.com/dhth/bmm'
-```
-
-### Interaction with tags
-
-```bash
-# Show saved tags
-bmm tags list \
-    --format json \
-    --show-stats
-
-# open saved tags in bmm's TUI
-bmm tags list --tui
-
-# rename tag
-bmm tags rename old-tag new-tag
-
-# delete tags 
-bmm tags delete tag1 tag2 tag3
-```
-
-### Delete bookmarks
-
-```bash
-bmm delete 'https://github.com/dhth/bmm' 'https://github.com/dhth/omm'
-
-# skip confirmation
-bmm delete --yes 'https://github.com/dhth/bmm'
-```
-
-### Check bookmarks for broken links
-
-`bmm` can visit your saved bookmarks and report which ones are no longer
-reachable (eg. the site is down, the page was removed, etc.)
-
-```bash
-# check all bookmarks
-bmm check
-
-# only check bookmarks that have a given tag
-bmm check --tags golang
-
-# by default, only broken links are shown; pass --show-all to see everything
-bmm check --show-all
-
-# check more links at the same time, and give up on slow ones sooner
-bmm check --concurrency 20 --timeout 5
-```
-
-### Notes for a bookmark
-
-`bmm` lets you attach a note to any saved bookmark — a couple of words, or
-a full multi-paragraph writeup. Running `bmm notes <uri>` opens the note in
-your text editor (the same one used for `bmm save -e`), pre-filled with
-whatever's already there.
-
-```bash
-# add/edit a note (opens your $EDITOR)
-bmm notes 'https://github.com/dhth/bmm'
-
-# just print the current note, without opening an editor
-bmm notes 'https://github.com/dhth/bmm' --print
-```
-
-📟 TUI mode
----
-
-To allow for easy browsing, `bmm` ships with its own TUI. It can be launched
-either in a generic mode (via `bmm tui`) or in the context of a specific command
-(e.g., `bmm search tools --tui`).
-
-The TUI lets you do the following:
-
-- Search bookmarks based on terms
-- List all tags
-- View bookmarks that hold a tag
-
-Feature requests for the TUI can be submitted via `bmm's` [issues
-page](https://github.com/raisubham1024/bmm/issues).
-
-![tui](https://github.com/user-attachments/assets/6ca63039-8872-4520-93da-1576cc0cf8ec)
-
-### Opening bookmarks in incognito/private mode (TUI)
-
-Inside the TUI, `i` opens the bookmark under the cursor in an incognito/
-private window, and `I` does the same for every bookmark currently listed.
-`bmm` tries to detect a supported browser automatically (Chrome, Chromium,
-Brave, Edge, or Firefox). If it can't find one, or you want to force a
-specific browser, set these environment variables:
-
-```bash
-# executable name (desktop) or app name (macOS) of your browser
-export BMM_BROWSER=brave-browser
-
-# only needed if your browser isn't chromium/firefox-style
-export BMM_BROWSER_INCOGNITO_FLAG=--incognito
-```
-
-Note: on Android, incognito-opening only works if Chrome is your installed
-browser, since Android has no generic "open incognito" mechanism.
-
-### TUI Reference Manual
-
-```text
-bmm has eight views.
-
-- Bookmarks List View
-- Tags List View
-- Edit Bookmark View
-- Notes View
-- Database List View
-- New Database Name View
-- Confirm View
-- Help View (this one)
-
-
-#you can see these views by pressing "Alt + m" in a TUI mode (bmm tui)
-
----
-
-
-```
-in TUI 
-
-
-> [!info] bydefault TUI mode in 'Search mode', to use other functionality switch to 'Normal mode' by press 'Esc'
-
-
-|Most important     |     |
-| --- | --- |
-|   Alt + m  |  to switch between different modes (like )   |
-
-
-|General    |     |
-| --- | --- |
-|   ?   |   show/hide help view  |
-|   Esc   |   go to normal mode  |
-| q | quit the TUI mode |
-| j / Down arrow | go down in a list |
-| k / Up arrow | go up in a list |
-
-
-|   Bookmarks related  |     |
-| --- | --- |
-|   s  |  show search box   |
-|  Enter   |   submit search query  OR if you leave search box empty then press Enter, it shows all bookmarks  |
-|   a  |   add a new bookmark (URL, title, tags)  |
-|  t   |   show Tags List View for the active database (when search is not active)  |
-|  T   |   show Tags List View across all databases at once - tag counts are summed across databases, and results from picking a tag show which database each bookmark is from  |
-|   e  |   edit the title/tags of the bookmark under cursor  |
-|  E   |  edit the URL (as well as title/tags) of the bookmark under cursor   |
-|   n  |   add/edit a note for the bookmark under cursor (hidden)  |
-|   N  |  delete the note for the bookmark under cursor, if it  has one (asks for confirmation) |
-|   \*  |   toggle star on the bookmark under cursor  |
-|   S  |   show only starred bookmarks  |
-|   A  |  show/switch between databases   |
-|  z   |   search across all databases at once (results show  which database each bookmark is from) |
-|  d/delete   |   delete the bookmark under cursor (asks for confirmation)  |
-|  D   |   delete every bookmark currently listed, all at once (asks for confirmation, and always shows exactly how many links will be deleted)  |
-|  o   |   open URL in browser  |
-|  i   |   open URL in browser (incognito/private window)  |
-|  O   |  open all listed bookmarks in browser (max 30; warns if more)   |
-|  I   |   open all listed bookmarks in browser, incognito/private  (max 30; warns if more) |
-|  y   |   copy selected URL  |
-|  Y   |    copy all the resulted URLs to system clipboard |
-
-
-|  Tags List View    |     |
+> to show all tags :
+> - default you open search mode , then press `enter` to show all bookmarks then press `t` to show all tags
+>   
+>   OR
+>   
+> - press `Alt + m` to switch mode and press the number  `3` to show all bookmarks
+
+|  key    | Description    |
 | --- | --- |
 |  /   |  show tag search input   |
-|   Enter  |  show bookmarks that are tagged with the one under cursor (across every database, if the Tags List View was opened with "T")   |
-|  Alt+e  |  rename the tag under cursor - updates every bookmark that used it (across every database, if opened with "T"); if the new name you type already exists as a tag, it's offered as a suggestion so you can merge into it instead of creating a duplicate; Ctrl+s to save, Esc to cancel   |
+|   Enter  |  show bookmarks that are tagged with the one under cursor   |
 
+---
 
-|Edit Bookmark View     |     |
+**Edit Bookmark View**
+> [!info] 
+> search and select the link by pressing enter, then press `e` for edit "Title  + Tag" OR `E` for edit "URL + Title + Tag"
+> 
+> 💁 * `e` and `E` , two different functionalty, So that you don't accidentally change the URL while editing.*
+
+|key     |  Description  |
 | --- | --- |
 |  Tab / Down   |  move to the next field   |
 |   Shift+Tab / Up  |  move to the previous field   |
 |  Ctrl+s   |  save changes (asks for confirmation)   |
 |   Esc  |   cancel editing (asks for confirmation if there are unsaved changes) |
 
+---
 
-|  Notes View   |     |
+**Notes View**
+> [!info] 
+> switch to Notes search mode by => `Alt + n`
+
+
+|  key   | Description    |
 | --- | --- |
 |   Ctrl+s  |  save the note (asks for confirmation)   |
 |   Esc  |   cancel (asks for confirmation if there are  unsaved changes)|
 
+---
 
-|   Database List View  |     |
+**Database List View**
+
+> [!info] 
+> switch to different database => `A`
+
+|   key  | Description    |
 | --- | --- |
-|   Enter  |   switch to the database under cursor for this session (resets to bmm.db next time you start bmm) |
+|   Enter  |   switch to the database under cursor for this session ( ℹ️ when you open bmm it bydefault select the `bmm.db` database ) |
 |  C   |  create a new database  and then "ctrl+s" to save |
 |  Esc   |   go back  |
+
+
+> [!info] Note
+I didn't add a delete option for databases to avoid accidental deletion. But if you need to delete of those database, you can do it this way:
+> ```bash
+> #go to database location
+> cd ~/.local/share/bmm
+> 
+> #run 'ls' commands to see the list of database
+> ls
+> 
+> #to remove the database name like for example a dabase name 'example.db', to remove it, do this
+> rm example.db
+---
 
 
 
