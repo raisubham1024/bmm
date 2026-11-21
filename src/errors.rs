@@ -26,6 +26,8 @@ pub enum AppError {
     CouldntInitializeDatabase(#[from] DBError),
     #[error("database path is not valid string")]
     DBPathNotValidStr,
+    #[error("no database named \"{0}\" (your databases: {1})")]
+    DatabaseNotFound(String, String),
 
     // bookmarks related
     #[error("couldn't import bookmarks: {0}")]
@@ -79,6 +81,7 @@ impl AppError {
             AppError::CouldntCreateDataDirectory(_) => Some(101),
             AppError::CouldntInitializeDatabase(_) => Some(102),
             AppError::DBPathNotValidStr => None,
+            AppError::DatabaseNotFound(_, _) => None,
             AppError::CouldntImportBookmarks(e) => match e {
                 ImportError::FileHasNoExtension => None,
                 ImportError::FileDoesntExist => None,

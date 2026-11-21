@@ -30,10 +30,90 @@ fn apply_parent_tag(tags: Vec<String>, ptag: Option<&str>) -> Vec<String> {
     }
 }
 
+/// Names of the databases in bmm's data directory, sorted.
+fn local_database_names(bmm_dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(bmm_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("db"))
+        .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+        .collect();
+    names.sort();
+    names
+}
+
+/// Other databases (besides `current_db_name`) that have a tag with this
+/// name - used to explain a "no such tag" error: the tag is probably in a
+/// database other than the one the command ran on.
+async fn databases_with_tag(tag: &str, current_db_name: &str) -> Vec<String> {
+    let mut found = Vec::new();
+
+    let Ok(data_dir) = get_data_dir() else {
+        return found;
+    };
+
+    for name in local_database_names(&data_dir.join(DATA_DIR)) {
+        if name == current_db_name {
+            continue;
+        }
+        let Some(path) = data_dir.join(DATA_DIR).join(&name).to_str().map(String::from) else {
+            continue;
+        };
+        if let Ok(pool) = get_db_pool(&path).await {
+            if let Ok(tags) = crate::persistence::get_tags_with_stats(&pool).await
+                && tags.iter().any(|t| t.name == tag)
+            {
+                found.push(name);
+            }
+            pool.close().await;
+        }
+    }
+
+    found
+}
+
+fn print_tag_hint(tag: &str, current_db_name: &str, others: &[String]) {
+    if others.is_empty() {
+        return;
+    }
+    eprintln!(
+        "hint: tag \"{tag}\" isn't in {current_db_name}, but it is in: {}\n      run the command again with --db <NAME> (eg. --db {})",
+        others.join(", "),
+        others[0].trim_end_matches(".db"),
+    );
+}
+
 pub async fn handle(args: Args) -> Result<(), AppError> {
-    let db_path = match &args.db_path {
-        Some(p) => PathBuf::from(p),
-        None => {
+    let db_path = match (&args.db_path, &args.db) {
+        (Some(p), _) => PathBuf::from(p),
+        (None, Some(name)) => {
+            let user_data_dir = get_data_dir().map_err(AppError::CouldntGetDataDirectory)?;
+            let data_dir = user_data_dir.join(PathBuf::from(DATA_DIR));
+
+            let wanted = name.trim();
+            let file_name = if wanted.to_lowercase().ends_with(".db") {
+                wanted.to_string()
+            } else {
+                format!("{wanted}.db")
+            };
+
+            let available = local_database_names(&data_dir);
+            if !available.contains(&file_name) {
+                return Err(AppError::DatabaseNotFound(
+                    wanted.to_string(),
+                    if available.is_empty() {
+                        "none yet".to_string()
+                    } else {
+                        available.join(", ")
+                    },
+                ));
+            }
+
+            data_dir.join(file_name)
+        }
+        (None, None) => {
             let user_data_dir = get_data_dir().map_err(AppError::CouldntGetDataDirectory)?;
             let data_dir = user_data_dir.join(PathBuf::from(DATA_DIR));
 
@@ -172,11 +252,27 @@ pub async fn handle(args: Args) -> Result<(), AppError> {
             TagsCommand::Rename {
                 source_tag,
                 target_tag,
-            } => rename_tag(&pool, source_tag, target_tag).await?,
+            } => {
+                let result = rename_tag(&pool, source_tag.clone(), target_tag).await;
+                if let Err(crate::cli::RenameTagError::NoSuchTag) = &result {
+                    let others = databases_with_tag(source_tag.trim(), &db_name).await;
+                    print_tag_hint(source_tag.trim(), &db_name, &others);
+                }
+                result?
+            }
             TagsCommand::Delete {
                 tags,
                 skip_confirmation,
-            } => delete_tags(&pool, tags, skip_confirmation).await?,
+            } => {
+                let result = delete_tags(&pool, tags.clone(), skip_confirmation).await;
+                if let Err(crate::cli::DeleteTagsError::TagsDoNotExist(missing)) = &result {
+                    for tag in missing {
+                        let others = databases_with_tag(tag.trim(), &db_name).await;
+                        print_tag_hint(tag.trim(), &db_name, &others);
+                    }
+                }
+                result?
+            }
         },
         BmmCommand::Check {
             uri,

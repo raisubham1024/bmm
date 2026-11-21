@@ -1,4 +1,4 @@
-use crate::domain::{TAG_REGEX_STR, Tag};
+use crate::domain::{TAG_RULES_STR, Tag};
 use crate::persistence::DBError;
 use crate::persistence::rename_tag_name;
 use sqlx::{Pool, Sqlite};
@@ -11,7 +11,7 @@ pub enum RenameTagError {
     NoSuchTag,
     #[error(transparent)]
     CouldntRenameTag(#[from] DBError),
-    #[error("new tag is invalid (valid regex: {TAG_REGEX_STR})")]
+    #[error("new tag is invalid (allowed: {TAG_RULES_STR})")]
     TagIsInvalid,
 }
 

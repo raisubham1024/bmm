@@ -1,4 +1,10 @@
-use super::{commands::Command, common::*, message::Message};
+use super::{
+    commands::Command,
+    common::*,
+    db_order::{self, AltNumber},
+    folders::{Folders, UNFILED_LABEL},
+    message::{DatabaseRenameOutcome, LinkCheckOutcome, Message},
+};
 use crate::{
     domain::{SavedBookmark, TagStats},
     persistence::{SearchScope, SearchTerms},
@@ -9,8 +15,14 @@ use ratatui::{
     widgets::{ListItem, ListState, TableState},
 };
 use sqlx::{Pool, Sqlite};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 use tui_input::Input;
+
+/// How long after the last `Alt+<digit>` a possibly-unfinished database
+/// number (eg. the "1" of "12") is applied. Terminals don't tell bmm when
+/// Alt is released, so a short pause stands in for "Alt was let go".
+const ALT_NUMBER_TIMEOUT: Duration = Duration::from_millis(700);
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) enum RunningState {
@@ -33,10 +45,11 @@ pub(super) enum ModeOption {
     NoteSearch,
     Databases,
     Help,
+    Folders,
 }
 
 impl ModeOption {
-    pub(super) const ALL: [ModeOption; 8] = [
+    pub(super) const ALL: [ModeOption; 9] = [
         ModeOption::AllBookmarks,
         ModeOption::ScopedSearch,
         ModeOption::Tags,
@@ -45,6 +58,7 @@ impl ModeOption {
         ModeOption::NoteSearch,
         ModeOption::Databases,
         ModeOption::Help,
+        ModeOption::Folders,
     ];
 
     pub(super) fn label(&self) -> &'static str {
@@ -57,6 +71,7 @@ impl ModeOption {
             ModeOption::NoteSearch => "search notes",
             ModeOption::Databases => "switch database",
             ModeOption::Help => "help",
+            ModeOption::Folders => "folders of databases",
         }
     }
 
@@ -70,6 +85,7 @@ impl ModeOption {
             ModeOption::NoteSearch => "Alt+n",
             ModeOption::Databases => "A",
             ModeOption::Help => "?",
+            ModeOption::Folders => "F",
         }
     }
 
@@ -83,6 +99,7 @@ impl ModeOption {
             ModeOption::NoteSearch => Message::ToggleNoteSearch,
             ModeOption::Databases => Message::ShowDatabaseList,
             ModeOption::Help => Message::ShowView(ActivePane::Help),
+            ModeOption::Folders => Message::ShowFolders,
         }
     }
 }
@@ -137,12 +154,15 @@ impl SearchScopeOption {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct BookmarkItem {
     pub(crate) bookmark: SavedBookmark,
     pub(crate) status: bool,
     pub(crate) starred: bool,
     pub(crate) source_db: Option<(String, String)>,
+    /// Why this link can't be opened, set only in the broken-links view
+    /// (Alt+B); such items are drawn in red.
+    pub(crate) broken_reason: Option<String>,
     /// Whether this bookmark has a note attached. `None` means it hasn't
     /// been checked yet - fetched lazily (only for the selected item, one
     /// bookmark at a time) rather than upfront for the whole list, to keep
@@ -153,16 +173,71 @@ pub(crate) struct BookmarkItem {
     pub(crate) marked: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct BookmarkItems {
     pub(crate) items: Vec<BookmarkItem>,
     pub(crate) state: ListState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct TagItems {
     pub(crate) items: Vec<TagStats>,
     pub(crate) state: ListState,
+}
+
+/// Everything needed to put a main view (bookmark list, tags list, ...)
+/// back on screen exactly as it was - used by Esc to step back through
+/// the views the user visited.
+pub(crate) struct LinkCheckState {
+    id: u64,
+    pub(super) total: usize,
+    pub(super) done: usize,
+    /// The uris being checked, to tell whether the list on screen is
+    /// still the one that was checked when the result arrives.
+    uris: HashSet<String>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ViewSnapshot {
+    pane: ActivePane,
+    bookmark_items: BookmarkItems,
+    tag_items: TagItems,
+    all_tag_items: Vec<TagStats>,
+    showing_starred: bool,
+    initial: bool,
+    global_search_mode: bool,
+    note_search_mode: bool,
+    search_scope: SearchScope,
+    search_input: Input,
+    global_tags_mode: bool,
+}
+
+impl ViewSnapshot {
+    /// Identifies *what* is shown (not where the cursor is), so a no-op
+    /// "navigation" to the very same view can be recognised and skipped.
+    fn fingerprint(&self) -> String {
+        format!(
+            "{:?}|{}|{}|{}|{}|{}|{}|{:?}|{:?}",
+            self.pane,
+            self.showing_starred,
+            self.initial,
+            self.global_search_mode,
+            self.note_search_mode,
+            self.global_tags_mode,
+            self.search_input.value(),
+            self.bookmark_items
+                .items
+                .iter()
+                .map(|b| (&b.bookmark.uri, &b.source_db, &b.broken_reason))
+                .collect::<Vec<_>>(),
+            self.tag_items
+                .items
+                .iter()
+                .map(|t| &t.name)
+                .collect::<Vec<_>>(),
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -276,6 +351,7 @@ impl BookmarkItem {
             status,
             starred: false,
             source_db: None,
+            broken_reason: None,
             has_note: None,
             marked: false,
         }
@@ -287,6 +363,7 @@ impl BookmarkItem {
             status: false,
             starred: false,
             source_db: Some((name, path)),
+            broken_reason: None,
             has_note: None,
             marked: false,
         }
@@ -301,6 +378,15 @@ impl From<&BookmarkItem> for ListItem<'_> {
             Some((name, _)) => format!("  [{name}]"),
             None => String::new(),
         };
+        if let Some(reason) = &value.broken_reason {
+            return ListItem::new(Line::styled(
+                format!(
+                    "[{reason}] {mark_prefix}{star_prefix}{}{db_suffix}",
+                    value.bookmark.uri
+                ),
+                Style::new().fg(ratatui::style::Color::Red),
+            ));
+        }
         let line = match value.status {
             false => Line::from(format!(
                 "{mark_prefix}{star_prefix}{}{db_suffix}",
@@ -389,6 +475,9 @@ pub(super) struct Model {
     /// Index into `tag_suggestions` that's currently highlighted (via
     /// Up/Down), if any.
     pub(super) tag_suggestion_selected: Option<usize>,
+    /// Alt+z in the tags field: list *every* existing tag instead of only
+    /// the ones matching what's typed.
+    pub(super) tag_suggest_all: bool,
     pub(super) edit_original_title: Option<String>,
     pub(super) edit_original_tags: Option<String>,
     /// Whether the Tags List view is currently showing tags aggregated
@@ -425,6 +514,54 @@ pub(super) struct Model {
     /// active database, or to pick a destination for a bookmark move.
     pub(super) db_list_purpose: DbListPurpose,
     pub(super) new_db_name_input: Input,
+    /// Whether the database name input is creating a new database or
+    /// renaming an existing one.
+    pub(super) db_name_purpose: DbNamePurpose,
+    /// Set while a database rename is running, to ignore a second submit.
+    pub(super) db_rename_in_flight: bool,
+    /// Number of bookmarks per database (by file name; `None` = couldn't
+    /// be counted), shown as "[ <count> ]" in the Database List view.
+    pub(super) db_counts: HashMap<String, Option<i64>>,
+    pub(super) db_counts_loaded: bool,
+    /// `Some(index)` while a database is being arranged (`a`): the
+    /// position the picked database started from. The cursor then marks
+    /// the position it'll be moved to.
+    pub(super) db_arrange_origin: Option<usize>,
+    /// Where the list that can be clicked (databases / folders) was drawn
+    /// in the last frame, so a mouse click can be turned into a row.
+    pub(super) click_area: Option<ratatui::layout::Rect>,
+    pub(super) folders: Folders,
+    pub(super) folder_list_state: ListState,
+    pub(super) folder_list_purpose: FolderListPurpose,
+    /// The folder whose databases are listed in `FolderContents`
+    /// (`None` = the databases that are in no folder).
+    pub(super) folder_open: Option<String>,
+    /// The databases listed in `FolderContents`.
+    pub(super) folder_dbs: Vec<String>,
+    pub(super) folder_dbs_state: ListState,
+    /// Databases marked with Space in `FolderContents`.
+    pub(super) marked_dbs: HashSet<String>,
+    /// Databases waiting for a destination folder (`m`).
+    pub(super) folder_move_names: Vec<String>,
+    /// Current ordering of the database list (Alt+1..Alt+4).
+    pub(super) db_view: DbView,
+    /// The databases in the order the user arranged (what Alt+1 shows).
+    /// `available_dbs` is this same list put in the current view's order.
+    pub(super) custom_dbs: Vec<String>,
+    /// Views the user came from (oldest first), so Esc can walk back
+    /// through them one at a time before finally quitting.
+    pub(super) nav_history: Vec<ViewSnapshot>,
+    pub(super) skip_nav_push: bool,
+    /// Set when search results were shown with nothing to go back to (eg.
+    /// searching right after bmm opened): Esc then returns to the full
+    /// list of bookmarks before it quits.
+    pub(super) search_results_from_home: bool,
+    /// A link check (Alt+B) that's running right now.
+    pub(super) link_check: Option<LinkCheckState>,
+    link_check_counter: u64,
+    /// Digits typed so far with Alt held down in the Database List view.
+    pub(super) alt_number_buffer: String,
+    pub(super) alt_number_deadline: Option<Instant>,
     pub(super) global_search_mode: bool,
     pub(super) note_search_mode: bool,
     /// Which field(s) the search box currently matches against - `All`
@@ -469,6 +606,39 @@ pub(super) struct Model {
 /// `["foo", "bar"]`) and the in-progress fragment after it (trimmed -
 /// `"ba"`). A value with no comma at all is treated as a single
 /// in-progress fragment (no completed tags yet).
+/// How well a typed fragment matches a tag name, for autocomplete: `Some(0)`
+/// when the name starts with it, `Some(1)` when the fragment's letters
+/// appear in the name in the same order *starting from its first letter*
+/// (so "leanet" and "lework" both find "learn_networking", and "lea" +
+/// anything further along in the name works too), `None` otherwise.
+/// Both arguments must already be lowercase.
+pub(super) fn tag_match_rank(name_lower: &str, fragment_lower: &str) -> Option<u8> {
+    if name_lower.starts_with(fragment_lower) {
+        return Some(0);
+    }
+
+    let mut name_chars = name_lower.chars();
+    let mut fragment_chars = fragment_lower.chars().peekable();
+
+    // the first letter must match the name's first letter
+    if name_lower.chars().next() != fragment_lower.chars().next() {
+        return None;
+    }
+
+    // every letter of the fragment must be found, in order
+    for wanted in fragment_chars.by_ref() {
+        loop {
+            match name_chars.next() {
+                Some(c) if c == wanted => break,
+                Some(_) => continue,
+                None => return None,
+            }
+        }
+    }
+
+    Some(1)
+}
+
 fn split_tags_input(tags_value: &str) -> (Vec<String>, String) {
     let mut parts: Vec<&str> = tags_value.split(',').collect();
     let fragment = parts.pop().unwrap_or("").trim().to_string();
@@ -529,6 +699,7 @@ impl Model {
             edit_focus: EditField::Title,
             tag_suggestions: vec![],
             tag_suggestion_selected: None,
+            tag_suggest_all: false,
             edit_original_title: None,
             edit_original_tags: None,
             global_tags_mode: false,
@@ -549,6 +720,29 @@ impl Model {
             db_search_input: Input::default(),
             db_list_purpose: DbListPurpose::Switch,
             new_db_name_input: Input::default(),
+            db_name_purpose: DbNamePurpose::Create,
+            db_rename_in_flight: false,
+            db_counts: HashMap::new(),
+            db_counts_loaded: false,
+            db_arrange_origin: None,
+            click_area: None,
+            folders: Folders::default(),
+            folder_list_state: ListState::default().with_selected(Some(0)),
+            folder_list_purpose: FolderListPurpose::Browse,
+            folder_open: None,
+            folder_dbs: vec![],
+            folder_dbs_state: ListState::default().with_selected(Some(0)),
+            marked_dbs: HashSet::new(),
+            folder_move_names: vec![],
+            db_view: DbView::Custom,
+            custom_dbs: vec![],
+            nav_history: vec![],
+            skip_nav_push: false,
+            search_results_from_home: false,
+            link_check: None,
+            link_check_counter: 0,
+            alt_number_buffer: String::new(),
+            alt_number_deadline: None,
             global_search_mode: false,
             note_search_mode: false,
             search_scope: SearchScope::All,
@@ -575,6 +769,8 @@ impl Model {
             ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
                 self.db_list_state.select_next()
             }
+            ActivePane::FolderList => self.folder_list_state.select_next(),
+            ActivePane::FolderContents => self.folder_dbs_state.select_next(),
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_next(),
             ActivePane::SearchScopePicker => self.scope_picker_state.select_next(),
             ActivePane::SearchInput => {}
@@ -596,6 +792,8 @@ impl Model {
             ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
                 self.db_list_state.select_previous()
             }
+            ActivePane::FolderList => self.folder_list_state.select_previous(),
+            ActivePane::FolderContents => self.folder_dbs_state.select_previous(),
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_previous(),
             ActivePane::SearchScopePicker => self.scope_picker_state.select_previous(),
             ActivePane::SearchInput => {}
@@ -617,6 +815,8 @@ impl Model {
             ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
                 self.db_list_state.select_first()
             }
+            ActivePane::FolderList => self.folder_list_state.select_first(),
+            ActivePane::FolderContents => self.folder_dbs_state.select_first(),
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_first(),
             ActivePane::SearchScopePicker => self.scope_picker_state.select_first(),
             ActivePane::SearchInput => {}
@@ -637,6 +837,8 @@ impl Model {
             ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
                 self.db_list_state.select_last()
             }
+            ActivePane::FolderList => self.folder_list_state.select_last(),
+            ActivePane::FolderContents => self.folder_dbs_state.select_last(),
             ActivePane::ModeSwitcher => self.mode_switcher_state.select_last(),
             ActivePane::SearchScopePicker => self.scope_picker_state.select_last(),
             ActivePane::SearchInput => {}
@@ -661,6 +863,8 @@ impl Model {
             ActivePane::Notes => view,
             ActivePane::DatabaseList => view,
             ActivePane::DatabaseSearchInput => view,
+            ActivePane::FolderList => view,
+            ActivePane::FolderContents => view,
             ActivePane::NewDatabaseName => view,
             ActivePane::Confirm => view,
             ActivePane::ModeSwitcher => view,
@@ -686,6 +890,7 @@ impl Model {
                 self.global_tags_mode = false;
                 Some(Command::FetchTags)
             }
+            ActivePane::FolderList | ActivePane::FolderContents => None,
             ActivePane::TagSearchInput => None,
             ActivePane::RenameTag => None,
             ActivePane::SearchInput => {
@@ -711,6 +916,244 @@ impl Model {
     }
 
 
+    fn snapshot_view(&self, pane: ActivePane) -> ViewSnapshot {
+        // only "main" views can be returned to; anything else (a search box,
+        // a popup, an edit screen...) counts as the bookmark list
+        let pane = match pane {
+            ActivePane::List
+            | ActivePane::TagsList
+            | ActivePane::DatabaseList
+            | ActivePane::FolderList
+            | ActivePane::FolderContents
+            | ActivePane::Help => pane,
+            _ => ActivePane::List,
+        };
+
+        ViewSnapshot {
+            pane,
+            bookmark_items: self.bookmark_items.clone(),
+            tag_items: self.tag_items.clone(),
+            all_tag_items: self.all_tag_items.clone(),
+            showing_starred: self.showing_starred,
+            initial: self.initial,
+            global_search_mode: self.global_search_mode,
+            note_search_mode: self.note_search_mode,
+            search_scope: self.search_scope,
+            search_input: self.search_input.clone(),
+            global_tags_mode: self.global_tags_mode,
+        }
+    }
+
+    /// Remembers the view shown right now (as `pane`) before moving on to
+    /// another one, so Esc can come back to it.
+    pub(super) fn push_nav_snapshot(&mut self, pane: ActivePane) {
+        self.search_results_from_home = false;
+        let snapshot = self.snapshot_view(pane);
+
+        if self
+            .nav_history
+            .last()
+            .is_some_and(|last| last.fingerprint() == snapshot.fingerprint())
+        {
+            return;
+        }
+
+        self.nav_history.push(snapshot);
+        if self.nav_history.len() > 50 {
+            self.nav_history.remove(0);
+        }
+    }
+
+    /// Starts checking the links shown in the list (Alt+B).
+    pub(super) fn start_link_check(&mut self) -> Option<Command> {
+        if self.link_check.is_some() {
+            self.user_message = Some(UserMessage::error(
+                "already checking links (Esc cancels)",
+            ));
+            return None;
+        }
+
+        let mut seen = HashSet::new();
+        let uris: Vec<String> = self
+            .bookmark_items
+            .items
+            .iter()
+            .map(|i| i.bookmark.uri.clone())
+            .filter(|u| seen.insert(u.clone()))
+            .collect();
+
+        if uris.is_empty() {
+            self.user_message = Some(UserMessage::error("no links here to check"));
+            return None;
+        }
+
+        self.link_check_counter += 1;
+        let id = self.link_check_counter;
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        self.link_check = Some(LinkCheckState {
+            id,
+            total: uris.len(),
+            done: 0,
+            uris: seen,
+            cancel: cancel.clone(),
+        });
+        self.user_message = Some(UserMessage::info(&format!(
+            "checking {} links... (Esc cancels)",
+            uris.len()
+        )));
+
+        Some(Command::CheckLinks { id, uris, cancel })
+    }
+
+    /// Stops a running link check, if any. Returns whether one was running.
+    pub(super) fn cancel_link_check(&mut self) -> bool {
+        match self.link_check.take() {
+            Some(state) => {
+                state
+                    .cancel
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub(super) fn apply_link_check_progress(&mut self, id: u64, done: usize) {
+        if let Some(state) = self.link_check.as_mut()
+            && state.id == id
+        {
+            state.done = done.min(state.total);
+        }
+    }
+
+    /// Shows the broken links found by a finished check, as a separate
+    /// list - the list it was started from is remembered, so Esc goes back.
+    pub(super) fn apply_link_check_result(&mut self, outcome: LinkCheckOutcome) {
+        let Some(state) = self.link_check.take_if(|s| s.id == outcome.id) else {
+            return; // cancelled, or a leftover from an earlier check
+        };
+
+        if outcome.cancelled {
+            return;
+        }
+
+        if outcome.broken.is_empty() {
+            self.user_message = Some(
+                UserMessage::info(&format!(
+                    "all {} links are working!",
+                    outcome.checked
+                ))
+                .with_frames_left(1),
+            );
+            return;
+        }
+
+        let still_same_list = self.active_pane == ActivePane::List
+            && self.bookmark_items.items.len() >= state.uris.len()
+            && state
+                .uris
+                .iter()
+                .all(|u| self.bookmark_items.items.iter().any(|i| &i.bookmark.uri == u));
+
+        if !still_same_list {
+            self.user_message = Some(UserMessage::error(&format!(
+                "{} of {} links are broken - the view changed, press Alt+B again to see them",
+                outcome.broken.len(),
+                outcome.checked
+            )));
+            return;
+        }
+
+        let reasons: HashMap<String, String> = outcome.broken.into_iter().collect();
+
+        self.push_nav_snapshot(ActivePane::List);
+
+        let mut broken_items: Vec<BookmarkItem> = self
+            .bookmark_items
+            .items
+            .iter()
+            .filter(|i| reasons.contains_key(&i.bookmark.uri))
+            .cloned()
+            .collect();
+        for item in broken_items.iter_mut() {
+            item.broken_reason = reasons.get(&item.bookmark.uri).cloned();
+        }
+
+        let count = broken_items.len();
+        self.bookmark_items.items = broken_items;
+        self.bookmark_items.state.select(Some(0));
+
+        self.user_message = Some(UserMessage::info(&format!(
+            "{count} of {} links are broken (Esc: back)",
+            outcome.checked
+        )));
+    }
+
+    /// Removes a deleted/moved bookmark from every remembered view, so
+    /// going back with Esc never shows a bookmark that no longer exists.
+    pub(super) fn forget_uri_in_history(&mut self, uri: &str) {
+        for snapshot in self.nav_history.iter_mut() {
+            snapshot.bookmark_items.items.retain(|i| i.bookmark.uri != uri);
+
+            let len = snapshot.bookmark_items.items.len();
+            if len == 0 {
+                snapshot.bookmark_items.state.select(None);
+            } else if snapshot
+                .bookmark_items
+                .state
+                .selected()
+                .is_some_and(|s| s >= len)
+            {
+                snapshot.bookmark_items.state.select(Some(len - 1));
+            }
+        }
+    }
+
+    /// Edits, tag renames and bulk deletes change bookmarks in ways the
+    /// remembered views can't be patched for, so they're forgotten rather
+    /// than shown out of date.
+    pub(super) fn clear_nav_history(&mut self) {
+        self.nav_history.clear();
+    }
+
+    /// Goes back to the previous view, skipping any that look exactly
+    /// like what's already on screen. Returns `false` if there's nowhere
+    /// to go back to.
+    pub(super) fn pop_nav_history(&mut self) -> bool {
+        // the real pane, not the "main view" it counts as when remembered -
+        // eg. a search box opened over a list is not the same view as that
+        // list, or Esc would skip the list it should return to
+        let current = {
+            let mut snapshot = self.snapshot_view(self.active_pane);
+            snapshot.pane = self.active_pane;
+            snapshot.fingerprint()
+        };
+
+        while let Some(snapshot) = self.nav_history.pop() {
+            if snapshot.fingerprint() == current {
+                continue;
+            }
+
+            self.bookmark_items = snapshot.bookmark_items;
+            self.tag_items = snapshot.tag_items;
+            self.all_tag_items = snapshot.all_tag_items;
+            self.showing_starred = snapshot.showing_starred;
+            self.initial = snapshot.initial;
+            self.global_search_mode = snapshot.global_search_mode;
+            self.note_search_mode = snapshot.note_search_mode;
+            self.search_scope = snapshot.search_scope;
+            self.search_input = snapshot.search_input;
+            self.global_tags_mode = snapshot.global_tags_mode;
+            self.active_pane = snapshot.pane;
+            self.sync_starred_markers();
+            self.search_results_from_home = false;
+            return true;
+        }
+
+        false
+    }
+
     pub(super) fn go_back_or_quit(&mut self) -> Option<Command> {
         if self.terminal_too_small {
             self.running_state = RunningState::Done;
@@ -718,9 +1161,37 @@ impl Model {
         }
 
         match self.active_pane {
-            ActivePane::List => self.running_state = RunningState::Done,
-            ActivePane::Help => self.active_pane = ActivePane::List,
+            ActivePane::List => {
+                if self.cancel_link_check() {
+                    self.user_message =
+                        Some(UserMessage::info("link check cancelled").with_frames_left(1));
+                } else if self.pop_nav_history() {
+                    // went back to the previous view
+                } else if self.search_results_from_home {
+                    // search results with nothing before them: back to
+                    // the full list of bookmarks first
+                    self.search_results_from_home = false;
+                    self.global_search_mode = false;
+                    self.note_search_mode = false;
+                    self.search_scope = SearchScope::All;
+                    self.search_input.reset();
+                    return Some(Command::FetchAllBookmarks);
+                } else {
+                    self.running_state = RunningState::Done;
+                }
+            }
+            ActivePane::Help => {
+                if !self.pop_nav_history() {
+                    self.active_pane = ActivePane::List;
+                }
+            }
             ActivePane::SearchInput => {
+                // opened from another view: just go back to it
+                if !self.initial && self.pop_nav_history() {
+                    self.dismiss_search_tag_suggestions();
+                    return None;
+                }
+
                 self.search_input.reset();
                 self.initial = false;
                 self.active_pane = ActivePane::List;
@@ -754,22 +1225,60 @@ impl Model {
                 self.cancel_note_edit();
             }
             ActivePane::DatabaseList => {
+                let was_switching = self.db_list_purpose == DbListPurpose::Switch;
                 self.move_pending.clear();
                 self.db_list_purpose = DbListPurpose::Switch;
-                self.active_pane = ActivePane::List;
+                self.db_arrange_origin = None;
+                self.alt_number_buffer.clear();
+                        self.alt_number_deadline = None;
+                if !(was_switching && self.pop_nav_history()) {
+                    self.active_pane = ActivePane::List;
+                }
             }
             ActivePane::DatabaseSearchInput => {
-                self.cancel_database_search();
+                // only the search is cancelled - back to the database list
+                self.db_search_input.reset();
+                self.filtered_dbs = self.available_dbs.clone();
+                self.db_arrange_origin = None;
+                self.db_list_state.select(Some(0));
+                self.active_pane = ActivePane::DatabaseList;
             }
             ActivePane::NewDatabaseName => {
                 self.new_db_name_input.reset();
-                self.active_pane = ActivePane::List;
+                // cancelling a rename goes back to the database list it
+                // was started from; cancelling a create goes back to the
+                // bookmarks list, same as before
+                self.active_pane = match self.db_name_purpose {
+                    DbNamePurpose::Rename(_) => ActivePane::DatabaseList,
+                    DbNamePurpose::Create => ActivePane::DatabaseList,
+                    DbNamePurpose::CreateFolder | DbNamePurpose::RenameFolder(_) => {
+                        ActivePane::FolderList
+                    }
+                };
+                self.db_name_purpose = DbNamePurpose::Create;
             }
             ActivePane::Confirm => {
                 self.cancel_confirm();
             }
             ActivePane::TagsList => {
-                self.active_pane = ActivePane::List;
+                if !self.pop_nav_history() {
+                    self.active_pane = ActivePane::List;
+                }
+            }
+            ActivePane::FolderContents => {
+                self.marked_dbs.clear();
+                self.active_pane = ActivePane::FolderList;
+                self.select_open_folder_row();
+            }
+            ActivePane::FolderList => {
+                if self.folder_list_purpose == FolderListPurpose::MoveDatabases {
+                    // cancel picking a destination: back to the databases
+                    self.folder_list_purpose = FolderListPurpose::Browse;
+                    self.folder_move_names.clear();
+                    self.active_pane = ActivePane::FolderContents;
+                } else if !self.pop_nav_history() {
+                    self.active_pane = ActivePane::List;
+                }
             }
             ActivePane::ModeSwitcher => {
                 self.active_pane = self.pane_before_mode_switch;
@@ -841,7 +1350,12 @@ impl Model {
         } else {
             self.all_tag_items
                 .iter()
-                .filter(|t| t.name.to_lowercase().contains(&query))
+                .filter(|t| {
+                    let name_lower = t.name.to_lowercase();
+                    // anywhere in the name, or the letters in order from
+                    // the first one (eg. "leanet" -> "learn_networking")
+                    name_lower.contains(&query) || tag_match_rank(&name_lower, &query).is_some()
+                })
                 .cloned()
                 .collect()
         };
@@ -852,7 +1366,8 @@ impl Model {
     pub(super) fn cancel_tag_search(&mut self) {
         self.tag_search_input.reset();
         self.tag_items = TagItems::from(self.all_tag_items.clone());
-        self.active_pane = ActivePane::List;
+        // back to the tags list the search was started from
+        self.active_pane = ActivePane::TagsList;
     }
 
     pub(super) fn confirm_tag_search(&mut self) {
@@ -972,6 +1487,7 @@ impl Model {
     }
 
     pub(super) fn remove_bookmark_by_uri(&mut self, uri: &str) {
+        self.forget_uri_in_history(uri);
         if let Some(pos) = self
             .bookmark_items
             .items
@@ -1105,6 +1621,36 @@ impl Model {
     pub(super) fn recompute_tag_suggestions(&mut self) {
         let (completed, fragment) = split_tags_input(self.edit_tags_input.value());
 
+        if self.tag_suggest_all {
+            // every tag not already in the field - the ones matching what's
+            // typed first, then all the rest alphabetically
+            let fragment_lower = fragment.to_lowercase();
+            let completed_lower: HashSet<String> =
+                completed.iter().map(|t| t.to_lowercase()).collect();
+
+            let mut all: Vec<String> = self
+                .all_tag_items
+                .iter()
+                .map(|t| t.name.clone())
+                .filter(|name| !completed_lower.contains(&name.to_lowercase()))
+                .collect();
+
+            all.sort_by_key(|name| {
+                let name_lower = name.to_lowercase();
+                let rank = if fragment_lower.is_empty() {
+                    None
+                } else {
+                    tag_match_rank(&name_lower, &fragment_lower)
+                };
+                // `None` (no match) must sort after `Some(..)`
+                (rank.is_none(), rank, name_lower)
+            });
+
+            self.tag_suggestion_selected = if all.is_empty() { None } else { Some(0) };
+            self.tag_suggestions = all;
+            return;
+        }
+
         if fragment.is_empty() {
             self.dismiss_tag_suggestions();
             return;
@@ -1120,13 +1666,21 @@ impl Model {
             .map(|t| t.name.clone())
             .filter(|name| {
                 let name_lower = name.to_lowercase();
-                name_lower.starts_with(&fragment_lower)
+                tag_match_rank(&name_lower, &fragment_lower).is_some()
                     && name_lower != fragment_lower
                     && !completed_lower.contains(&name_lower)
             })
             .collect();
 
-        matches.sort();
+        // names starting with what was typed first, then the looser matches
+        // (shorter names first, as they're the closest fit)
+        matches.sort_by_key(|name| {
+            (
+                tag_match_rank(&name.to_lowercase(), &fragment_lower),
+                name.chars().count(),
+                name.clone(),
+            )
+        });
         matches.truncate(MAX_TAG_SUGGESTIONS);
 
         self.tag_suggestion_selected = if matches.is_empty() { None } else { Some(0) };
@@ -1158,6 +1712,7 @@ impl Model {
     }
 
     pub(super) fn dismiss_tag_suggestions(&mut self) {
+        self.tag_suggest_all = false;
         self.tag_suggestions.clear();
         self.tag_suggestion_selected = None;
     }
@@ -1269,13 +1824,21 @@ impl Model {
             .map(|t| t.name.clone())
             .filter(|name| {
                 let name_lower = name.to_lowercase();
-                name_lower.starts_with(&fragment_lower)
+                tag_match_rank(&name_lower, &fragment_lower).is_some()
                     && name_lower != fragment_lower
                     && !completed_lower.contains(&name_lower)
             })
             .collect();
 
-        matches.sort();
+        // names starting with what was typed first, then the looser matches
+        // (shorter names first, as they're the closest fit)
+        matches.sort_by_key(|name| {
+            (
+                tag_match_rank(&name.to_lowercase(), &fragment_lower),
+                name.chars().count(),
+                name.clone(),
+            )
+        });
         matches.truncate(MAX_TAG_SUGGESTIONS);
 
         self.search_tag_suggestion_selected = if matches.is_empty() { None } else { Some(0) };
@@ -1355,7 +1918,26 @@ impl Model {
 
         let new_value = format!("{}, ", completed.join(", "));
         self.edit_tags_input = Input::new(new_value);
-        self.dismiss_tag_suggestions();
+
+        if self.tag_suggest_all {
+            // keep the full list open (minus the tag just added), to pick
+            // several tags one after another
+            self.recompute_tag_suggestions();
+        } else {
+            self.dismiss_tag_suggestions();
+        }
+    }
+
+    /// Alt+z in the tags field: show every existing tag as a suggestion,
+    /// or (pressed again) go back to only the matching ones.
+    pub(super) fn toggle_all_tag_suggestions(&mut self) {
+        if self.tag_suggest_all {
+            self.dismiss_tag_suggestions();
+            self.recompute_tag_suggestions();
+        } else {
+            self.tag_suggest_all = true;
+            self.recompute_tag_suggestions();
+        }
     }
 
     //----------------------------------//
@@ -1407,13 +1989,19 @@ impl Model {
             .map(|t| t.name.clone())
             .filter(|name| {
                 let name_lower = name.to_lowercase();
-                name_lower.starts_with(&fragment_lower)
+                tag_match_rank(&name_lower, &fragment_lower).is_some()
                     && name_lower != fragment_lower
                     && name_lower != original_lower
             })
             .collect();
 
-        matches.sort();
+        matches.sort_by_key(|name| {
+            (
+                tag_match_rank(&name.to_lowercase(), &fragment_lower),
+                name.chars().count(),
+                name.clone(),
+            )
+        });
         matches.truncate(MAX_TAG_SUGGESTIONS);
 
         self.rename_tag_suggestion_selected = if matches.is_empty() { None } else { Some(0) };
@@ -1700,15 +2288,74 @@ impl Model {
             dbs.push(self.active_db_name.clone());
         }
 
-        dbs.sort();
-        self.available_dbs = dbs;
+        // the order the user arranged them in (`a`), then any databases
+        // not arranged yet, alphabetically
+        self.custom_dbs = db_order::apply_order(dbs, &db_order::load_order());
+        self.available_dbs = self.dbs_in_view_order();
         self.filtered_dbs = self.available_dbs.clone();
     }
 
+    /// `custom_dbs` put in the order of the current view (Alt+1..Alt+4).
+    /// Databases whose link count isn't known (yet) go last, and ties
+    /// keep the user's own arrangement.
+    fn dbs_in_view_order(&self) -> Vec<String> {
+        let mut dbs = self.custom_dbs.clone();
+        let count_of = |name: &String| self.db_counts.get(name).copied().flatten();
+
+        match self.db_view {
+            DbView::Custom => {}
+            DbView::NameAsc => dbs.sort_by_key(|n| n.to_lowercase()),
+            DbView::NameDesc => dbs.sort_by(|a, b| b.to_lowercase().cmp(&a.to_lowercase())),
+            DbView::CountAsc => dbs.sort_by_key(|n| match count_of(n) {
+                Some(c) => (0, c),
+                None => (1, 0),
+            }),
+            DbView::CountDesc => dbs.sort_by_key(|n| match count_of(n) {
+                Some(c) => (0, -c),
+                None => (1, 0),
+            }),
+        }
+
+        dbs
+    }
+
+    /// Re-sorts the list for the current view, keeping the same database
+    /// highlighted and any search filter applied.
+    fn reorder_db_list(&mut self) {
+        let selected_name = self
+            .selected_db_index()
+            .and_then(|i| self.filtered_dbs.get(i))
+            .cloned();
+
+        self.available_dbs = self.dbs_in_view_order();
+        self.filter_databases();
+
+        if let Some(name) = selected_name
+            && let Some(i) = self.filtered_dbs.iter().position(|d| d == &name)
+        {
+            self.db_list_state.select(Some(i));
+        }
+    }
+
+    pub(super) fn cycle_db_view(&mut self) {
+        self.set_db_view(self.db_view.next());
+    }
+
+    pub(super) fn set_db_view(&mut self, view: DbView) {
+        self.db_view = view;
+        self.reorder_db_list();
+        self.user_message = Some(UserMessage::info(&format!("view: {}", view.label())).with_frames_left(1));
+    }
+
     fn show_database_list_for(&mut self, purpose: DbListPurpose) {
+        // the list always opens in the user's own order (Alt+1)
+        self.db_view = DbView::Custom;
         self.scan_available_databases();
         self.db_search_input.reset();
         self.db_list_purpose = purpose;
+        self.db_arrange_origin = None;
+        self.alt_number_buffer.clear();
+        self.alt_number_deadline = None;
 
         let selected_index = self
             .filtered_dbs
@@ -1750,9 +2397,11 @@ impl Model {
     pub(super) fn cancel_database_search(&mut self) {
         self.db_search_input.reset();
         self.filtered_dbs = self.available_dbs.clone();
-        self.move_pending.clear();
-        self.db_list_purpose = DbListPurpose::Switch;
-        self.active_pane = ActivePane::List;
+        self.db_arrange_origin = None;
+        self.db_list_state.select(Some(0));
+        // only the search is cancelled: back to the database list it was
+        // started from (a pending move, if any, carries on)
+        self.active_pane = ActivePane::DatabaseList;
     }
 
     pub(super) fn confirm_database_search(&mut self) {
@@ -1920,7 +2569,671 @@ impl Model {
 
     pub(super) fn start_new_database_name(&mut self) {
         self.new_db_name_input.reset();
+        self.db_name_purpose = DbNamePurpose::Create;
         self.active_pane = ActivePane::NewDatabaseName;
+    }
+
+    //-------------------------------//
+    //  folders of databases ('F')    //
+    //-------------------------------//
+
+    /// Opens the folder list.
+    pub(super) fn show_folders(&mut self) {
+        self.scan_available_databases();
+        self.folders = Folders::load();
+        self.folder_list_purpose = FolderListPurpose::Browse;
+        self.folder_move_names.clear();
+        self.marked_dbs.clear();
+        self.folder_list_state.select(Some(0));
+        self.active_pane = ActivePane::FolderList;
+    }
+
+    /// The databases (that exist) in the given folder, in the user's own
+    /// database order. `None` = the databases that are in no folder.
+    pub(super) fn dbs_in_folder(&self, folder: Option<&str>) -> Vec<String> {
+        match folder {
+            Some(name) => self
+                .custom_dbs
+                .iter()
+                .filter(|d| self.folders.folder_of(d) == Some(name))
+                .cloned()
+                .collect(),
+            None => self.folders.unfiled(&self.custom_dbs),
+        }
+    }
+
+    /// The rows of the folder list: every folder, then "(no folder)" - which
+    /// is only listed when some database is in no folder, or while picking
+    /// a folder to move databases into (so they can be taken out of one).
+    pub(super) fn folder_rows(&self) -> Vec<FolderRow> {
+        let mut rows: Vec<FolderRow> = self
+            .folders
+            .folders
+            .iter()
+            .map(|f| FolderRow::Folder(f.name.clone()))
+            .collect();
+
+        if self.folder_list_purpose == FolderListPurpose::MoveDatabases
+            || !self.dbs_in_folder(None).is_empty()
+        {
+            rows.push(FolderRow::Unfiled);
+        }
+
+        rows
+    }
+
+    fn selected_folder_index(&self) -> Option<usize> {
+        let len = self.folder_rows().len();
+        if len == 0 {
+            return None;
+        }
+        Some(self.folder_list_state.selected().unwrap_or(0).min(len - 1))
+    }
+
+    pub(super) fn selected_folder_row(&self) -> Option<FolderRow> {
+        let index = self.selected_folder_index()?;
+        self.folder_rows().into_iter().nth(index)
+    }
+
+    fn row_folder_name(row: &FolderRow) -> Option<String> {
+        match row {
+            FolderRow::Folder(name) => Some(name.clone()),
+            FolderRow::Unfiled => None,
+        }
+    }
+
+    /// Puts the folder list's cursor on the folder that was open.
+    fn select_open_folder_row(&mut self) {
+        let rows = self.folder_rows();
+        let index = match &self.folder_open {
+            Some(name) => rows
+                .iter()
+                .position(|r| matches!(r, FolderRow::Folder(n) if n == name)),
+            None => rows.iter().position(|r| *r == FolderRow::Unfiled),
+        };
+        self.folder_list_state.select(Some(index.unwrap_or(0)));
+    }
+
+    fn refresh_folder_dbs(&mut self) {
+        self.folder_dbs = self.dbs_in_folder(self.folder_open.as_deref());
+        let len = self.folder_dbs.len();
+        if len == 0 {
+            self.folder_dbs_state.select(Some(0));
+        } else if self.folder_dbs_state.selected().unwrap_or(0) >= len {
+            self.folder_dbs_state.select(Some(len - 1));
+        }
+    }
+
+    pub(super) fn selected_folder_db_index(&self) -> Option<usize> {
+        if self.folder_dbs.is_empty() {
+            return None;
+        }
+        Some(
+            self.folder_dbs_state
+                .selected()
+                .unwrap_or(0)
+                .min(self.folder_dbs.len() - 1),
+        )
+    }
+
+    /// Enter in the folder list: open the folder - or, while picking a
+    /// destination, move the waiting databases into it.
+    pub(super) fn enter_selected_folder(&mut self) {
+        let Some(row) = self.selected_folder_row() else {
+            return;
+        };
+
+        match self.folder_list_purpose {
+            FolderListPurpose::Browse => {
+                self.folder_open = Self::row_folder_name(&row);
+                self.marked_dbs.clear();
+                self.folder_dbs_state.select(Some(0));
+                self.refresh_folder_dbs();
+                self.active_pane = ActivePane::FolderContents;
+            }
+            FolderListPurpose::MoveDatabases => {
+                let target = Self::row_folder_name(&row);
+                let names = std::mem::take(&mut self.folder_move_names);
+                self.folders.move_databases(&names, target.as_deref());
+
+                let destination = target.as_deref().unwrap_or(UNFILED_LABEL).to_string();
+                self.user_message = Some(match self.folders.save() {
+                    Ok(()) => UserMessage::info(&format!(
+                        "moved {} {} to \"{destination}\"",
+                        names.len(),
+                        if names.len() == 1 { "database" } else { "databases" }
+                    ))
+                    .with_frames_left(1),
+                    Err(e) => UserMessage::error(&format!("couldn't save folders: {e}")),
+                });
+
+                self.marked_dbs.clear();
+                self.folder_list_purpose = FolderListPurpose::Browse;
+                self.refresh_folder_dbs();
+                self.active_pane = ActivePane::FolderContents;
+            }
+        }
+    }
+
+    /// Space in a folder: marks/unmarks the database under cursor.
+    pub(super) fn toggle_mark_selected_db(&mut self) {
+        let Some(name) = self
+            .selected_folder_db_index()
+            .and_then(|i| self.folder_dbs.get(i))
+            .cloned()
+        else {
+            return;
+        };
+
+        if !self.marked_dbs.remove(&name) {
+            self.marked_dbs.insert(name);
+        }
+        self.folder_dbs_state.select_next();
+    }
+
+    /// `m` in a folder: pick the folder to move the marked databases into
+    /// (or the one under cursor, if none is marked).
+    pub(super) fn start_move_databases(&mut self) {
+        let mut names: Vec<String> = self
+            .folder_dbs
+            .iter()
+            .filter(|d| self.marked_dbs.contains(*d))
+            .cloned()
+            .collect();
+
+        if names.is_empty()
+            && let Some(name) = self
+                .selected_folder_db_index()
+                .and_then(|i| self.folder_dbs.get(i))
+        {
+            names.push(name.clone());
+        }
+
+        if names.is_empty() {
+            return;
+        }
+
+        self.folder_move_names = names;
+        self.folder_list_purpose = FolderListPurpose::MoveDatabases;
+
+        // start on the first folder other than the one being moved out of
+        let current = match &self.folder_open {
+            Some(name) => FolderRow::Folder(name.clone()),
+            None => FolderRow::Unfiled,
+        };
+        let first_other = self.folder_rows().iter().position(|r| *r != current);
+        match first_other {
+            Some(i) => self.folder_list_state.select(Some(i)),
+            None => self.select_open_folder_row(),
+        }
+        self.active_pane = ActivePane::FolderList;
+    }
+
+    /// Enter in a folder: switch to the database under cursor.
+    pub(super) fn request_switch_to_folder_db(&mut self) -> Option<Command> {
+        let name = self
+            .selected_folder_db_index()
+            .and_then(|i| self.folder_dbs.get(i))?
+            .clone();
+
+        if name == self.active_db_name {
+            self.user_message =
+                Some(UserMessage::info("already using this database").with_frames_left(1));
+            return None;
+        }
+
+        let data_dir = crate::utils::get_data_dir().ok()?;
+        let path = data_dir.join("bmm").join(&name);
+        let path = path.to_str()?.to_string();
+
+        Some(Command::SwitchDatabase {
+            path,
+            display_name: name,
+        })
+    }
+
+    /// `C` in the folder list: asks for the new folder's name.
+    pub(super) fn start_create_folder(&mut self) {
+        self.new_db_name_input.reset();
+        self.db_name_purpose = DbNamePurpose::CreateFolder;
+        self.active_pane = ActivePane::NewDatabaseName;
+    }
+
+    /// `R` in the folder list: asks for the folder's new name.
+    pub(super) fn start_rename_folder(&mut self) {
+        let Some(FolderRow::Folder(name)) = self.selected_folder_row() else {
+            self.user_message = Some(UserMessage::error(&format!(
+                "\"{UNFILED_LABEL}\" isn't a real folder, it can't be renamed"
+            )));
+            return;
+        };
+
+        self.new_db_name_input = Input::new(name.clone());
+        self.db_name_purpose = DbNamePurpose::RenameFolder(name);
+        self.active_pane = ActivePane::NewDatabaseName;
+    }
+
+    /// Enter in the folder-name input, when creating or renaming a folder.
+    pub(super) fn submit_folder_name(&mut self) {
+        let renaming = match &self.db_name_purpose {
+            DbNamePurpose::RenameFolder(old) => Some(old.clone()),
+            _ => None,
+        };
+
+        let name = match self
+            .folders
+            .validate_name(self.new_db_name_input.value(), renaming.as_deref())
+        {
+            Ok(n) => n,
+            Err(e) => {
+                self.user_message = Some(UserMessage::error(&e));
+                return;
+            }
+        };
+
+        match &renaming {
+            Some(old) => {
+                self.folders.rename(old, name.clone());
+                if self.folder_open.as_deref() == Some(old.as_str()) {
+                    self.folder_open = Some(name.clone());
+                }
+            }
+            None => self.folders.add(name.clone()),
+        }
+
+        self.user_message = Some(match self.folders.save() {
+            Ok(()) => UserMessage::info(&match renaming {
+                Some(_) => format!("folder renamed to \"{name}\""),
+                None => format!("folder \"{name}\" created"),
+            })
+            .with_frames_left(1),
+            Err(e) => UserMessage::error(&format!("couldn't save folders: {e}")),
+        });
+
+        self.new_db_name_input.reset();
+        self.db_name_purpose = DbNamePurpose::Create;
+        self.active_pane = ActivePane::FolderList;
+
+        let index = self
+            .folder_rows()
+            .iter()
+            .position(|r| matches!(r, FolderRow::Folder(n) if *n == name))
+            .unwrap_or(0);
+        self.folder_list_state.select(Some(index));
+    }
+
+    /// `D` in the folder list: deletes the folder (its databases are kept,
+    /// they just end up in no folder).
+    pub(super) fn delete_selected_folder(&mut self) {
+        let Some(FolderRow::Folder(name)) = self.selected_folder_row() else {
+            self.user_message = Some(UserMessage::error(&format!(
+                "\"{UNFILED_LABEL}\" isn't a real folder, it can't be deleted"
+            )));
+            return;
+        };
+
+        let moved = self.folders.delete(&name);
+        self.user_message = Some(match self.folders.save() {
+            Ok(()) => UserMessage::info(&format!(
+                "folder \"{name}\" deleted ({moved} {} now in no folder)",
+                if moved == 1 { "database is" } else { "databases are" }
+            ))
+            .with_frames_left(1),
+            Err(e) => UserMessage::error(&format!("couldn't save folders: {e}")),
+        });
+
+        let len = self.folder_rows().len();
+        let selected = self.folder_list_state.selected().unwrap_or(0);
+        self.folder_list_state
+            .select(Some(selected.min(len.saturating_sub(1))));
+    }
+
+    //-------------------------------//
+    //  database list extras:         //
+    //  counts, Alt+number, arrange,  //
+    //  rename                        //
+    //-------------------------------//
+
+    /// Which list row (0-based) is at this screen position, for the
+    /// database / folder lists - `None` if the position isn't on a row.
+    pub(super) fn clicked_row(&self, column: u16, row: u16) -> Option<usize> {
+        let area = self.click_area?;
+
+        if column < area.x
+            || column >= area.x + area.width
+            || row < area.y
+            || row >= area.y + area.height
+        {
+            return None;
+        }
+
+        let (offset, len) = match self.active_pane {
+            ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
+                (self.db_list_state.offset(), self.displayed_dbs().len())
+            }
+            ActivePane::FolderList => (self.folder_list_state.offset(), self.folder_rows().len()),
+            ActivePane::FolderContents => (self.folder_dbs_state.offset(), self.folder_dbs.len()),
+            _ => return None,
+        };
+
+        let index = offset + (row - area.y) as usize;
+        (index < len).then_some(index)
+    }
+
+    /// Index (into `filtered_dbs`) of the highlighted database, kept
+    /// within the list's bounds - the list state can briefly point one
+    /// past the end after pressing Down on the last item.
+    pub(super) fn selected_db_index(&self) -> Option<usize> {
+        if self.filtered_dbs.is_empty() {
+            return None;
+        }
+
+        Some(
+            self.db_list_state
+                .selected()
+                .unwrap_or(0)
+                .min(self.filtered_dbs.len() - 1),
+        )
+    }
+
+    /// The databases as they should be drawn right now. While arranging
+    /// (`a`), this previews the result: the picked database sits at the
+    /// cursor's number, and the one that had that number is at the picked
+    /// database's old number.
+    pub(super) fn displayed_dbs(&self) -> Vec<String> {
+        match (self.db_arrange_origin, self.selected_db_index()) {
+            (Some(origin), Some(target)) => db_order::swapped(&self.filtered_dbs, origin, target),
+            _ => self.filtered_dbs.clone(),
+        }
+    }
+
+    pub(super) fn apply_db_counts(&mut self, counts: Vec<(String, Option<i64>)>) {
+        self.db_counts = counts.into_iter().collect();
+        self.db_counts_loaded = true;
+
+        // count-based views can only be put in order once counts are known
+        if matches!(self.db_view, DbView::CountAsc | DbView::CountDesc)
+            && self.db_arrange_origin.is_none()
+        {
+            self.reorder_db_list();
+        }
+    }
+
+    /// Sum of the bookmarks across all databases, and whether every
+    /// database could be counted. `None` until counts have been fetched.
+    pub(super) fn total_db_count(&self) -> Option<(i64, bool)> {
+        if !self.db_counts_loaded {
+            return None;
+        }
+
+        let mut total = 0i64;
+        let mut complete = true;
+
+        for name in &self.available_dbs {
+            match self.db_counts.get(name) {
+                Some(Some(n)) => total += n,
+                _ => complete = false,
+            }
+        }
+
+        Some((total, complete))
+    }
+
+    /// Records one more digit typed with Alt held down. Returns `None` if
+    /// the digit was ignored (a leading zero).
+    pub(super) fn push_alt_digit(&mut self, c: char) -> Option<AltNumber> {
+        if self.alt_number_buffer.is_empty() && c == '0' {
+            // database numbers don't start with a zero
+            return None;
+        }
+
+
+        self.alt_number_buffer.push(c);
+
+        let outcome =
+            db_order::resolve_alt_number(&self.alt_number_buffer, self.filtered_dbs.len());
+
+        match outcome {
+            AltNumber::Wait => {
+                self.alt_number_deadline = Some(Instant::now() + ALT_NUMBER_TIMEOUT);
+            }
+            AltNumber::Jump(_) | AltNumber::Invalid => {
+                self.alt_number_buffer.clear();
+                self.alt_number_deadline = None;
+            }
+        }
+
+        Some(outcome)
+    }
+
+    pub(super) fn alt_number_expired(&self) -> bool {
+        self.alt_number_deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+    }
+
+    /// If the pause after the last Alt+digit has passed, takes the typed
+    /// number and returns the 0-based database index it refers to (if it
+    /// still refers to one). Clears the pending number either way.
+    pub(super) fn take_expired_alt_number(&mut self) -> Option<usize> {
+        if !self.alt_number_expired() {
+            return None;
+        }
+
+        self.alt_number_deadline = None;
+        let typed = std::mem::take(&mut self.alt_number_buffer);
+
+        if self.active_pane != ActivePane::DatabaseList || self.db_arrange_origin.is_some() {
+            return None;
+        }
+
+        let number = typed.parse::<usize>().ok()?;
+        if number == 0 || number > self.filtered_dbs.len() {
+            return None;
+        }
+
+        Some(number - 1)
+    }
+
+    /// Starts arranging (`a`): the highlighted database is picked up, and
+    /// Up/Down now choose the number it'll be moved to.
+    pub(super) fn start_arrange_databases(&mut self) {
+        if self.db_view != DbView::Custom {
+            self.user_message = Some(UserMessage::error(
+                "switch to view 1 (my order: Alt+Super+1, or press v) to arrange databases",
+            ));
+            return;
+        }
+
+        if self.filtered_dbs.len() != self.available_dbs.len() {
+            self.user_message = Some(UserMessage::error(
+                "clear the database search (/) before arranging",
+            ));
+            return;
+        }
+
+        if self.available_dbs.len() < 2 {
+            self.user_message = Some(UserMessage::error(
+                "you need at least 2 databases to arrange them",
+            ));
+            return;
+        }
+
+        let Some(index) = self.selected_db_index() else {
+            return;
+        };
+
+        self.db_list_state.select(Some(index));
+        self.db_arrange_origin = Some(index);
+    }
+
+    /// Saves the arrangement: the picked database takes the number under
+    /// the cursor, and the database that had that number takes the picked
+    /// database's old number.
+    pub(super) fn confirm_arrange_databases(&mut self) {
+        let Some(origin) = self.db_arrange_origin.take() else {
+            return;
+        };
+        let target = self.selected_db_index().unwrap_or(origin);
+        self.db_list_state.select(Some(target));
+
+        if origin == target {
+            return;
+        }
+
+        self.available_dbs = db_order::swapped(&self.available_dbs, origin, target);
+        self.custom_dbs = self.available_dbs.clone();
+        self.filtered_dbs = self.available_dbs.clone();
+
+        self.user_message = Some(match db_order::save_order(&self.available_dbs) {
+            Ok(()) => UserMessage::info("arranged!").with_frames_left(1),
+            Err(e) => UserMessage::error(&format!("couldn't save the new order: {e}")),
+        });
+    }
+
+    pub(super) fn cancel_arrange_databases(&mut self) {
+        if let Some(origin) = self.db_arrange_origin.take() {
+            self.db_list_state.select(Some(origin));
+        }
+    }
+
+    /// Opens the rename screen (`R`) for the highlighted database.
+    pub(super) fn start_rename_database(&mut self) {
+        let Some(name) = self
+            .selected_db_index()
+            .and_then(|i| self.filtered_dbs.get(i))
+            .cloned()
+        else {
+            return;
+        };
+
+        // bmm opens this one at every start, so renaming it would make
+        // bmm come up with a new, empty database next time
+        if name == db_order::DEFAULT_DB_NAME {
+            self.user_message = Some(UserMessage::error(&format!(
+                "{name} is the default database (bmm opens it on every start), so it can't be renamed"
+            )));
+            return;
+        }
+
+        let stem = name.strip_suffix(".db").unwrap_or(&name).to_string();
+        self.new_db_name_input = Input::new(stem);
+        self.db_name_purpose = DbNamePurpose::Rename(name);
+        self.active_pane = ActivePane::NewDatabaseName;
+    }
+
+    pub(super) fn request_rename_database(&mut self) -> Option<Command> {
+        if self.db_rename_in_flight {
+            return None;
+        }
+
+        let DbNamePurpose::Rename(old_name) = self.db_name_purpose.clone() else {
+            return None;
+        };
+
+        let new_name = match db_order::normalize_db_name(self.new_db_name_input.value()) {
+            Ok(n) => n,
+            Err(e) => {
+                self.user_message = Some(UserMessage::error(&e));
+                return None;
+            }
+        };
+
+        if new_name == old_name {
+            self.user_message = Some(UserMessage::info("name unchanged").with_frames_left(1));
+            self.new_db_name_input.reset();
+            self.db_name_purpose = DbNamePurpose::Create;
+            self.active_pane = ActivePane::DatabaseList;
+            return None;
+        }
+
+        let data_dir = crate::utils::get_data_dir().ok()?;
+        let bmm_dir = data_dir.join("bmm");
+        let old_path = bmm_dir.join(&old_name);
+        let new_path = bmm_dir.join(&new_name);
+
+        if !old_path.exists() {
+            self.user_message = Some(UserMessage::error(
+                "couldn't find this database's file in bmm's data directory",
+            ));
+            return None;
+        }
+
+        // A case-only change ("work.db" -> "Work.db") points at the very
+        // same file on case-insensitive file systems, so `exists()` alone
+        // can't be trusted there - but another listed database with
+        // exactly the new name is always a clash.
+        let same_name_ignoring_case = new_name.to_lowercase() == old_name.to_lowercase();
+        let clashes = self.available_dbs.iter().any(|d| d == &new_name)
+            || (!same_name_ignoring_case && new_path.exists());
+        if clashes {
+            self.user_message = Some(UserMessage::error(
+                "a database with this name already exists",
+            ));
+            return None;
+        }
+
+        let old_path = old_path.to_str()?.to_string();
+        let new_path = new_path.to_str()?.to_string();
+
+        self.db_rename_in_flight = true;
+
+        Some(Command::RenameDatabase {
+            is_active: old_name == self.active_db_name,
+            old_name,
+            old_path,
+            new_name,
+            new_path,
+        })
+    }
+
+    /// Applies a finished (successful) rename to what's on screen.
+    pub(super) fn apply_database_renamed(&mut self, outcome: &DatabaseRenameOutcome) {
+        // keep the renamed database at the same number it had before
+        let new_order =
+            db_order::rename_in_order(&self.custom_dbs, &outcome.old_name, &outcome.new_name);
+        let _ = db_order::save_order(&new_order);
+
+        // the renamed database stays in its folder
+        let mut folders = Folders::load();
+        folders.rename_database(&outcome.old_name, &outcome.new_name);
+        let _ = folders.save();
+
+        if self.active_db_name == outcome.old_name {
+            self.active_db_name = outcome.new_name.clone();
+        }
+
+        if let Some(count) = self.db_counts.remove(&outcome.old_name) {
+            self.db_counts.insert(outcome.new_name.clone(), count);
+        }
+
+        // results listed from a database that was just renamed (global
+        // search/tag results) must point at its new file - the old path
+        // is gone, and opening it again would create an empty database
+        for item in self.bookmark_items.items.iter_mut() {
+            if let Some((name, path)) = item.source_db.as_mut()
+                && *path == outcome.old_path
+            {
+                *name = outcome.new_name.clone();
+                *path = outcome.new_path.clone();
+            }
+        }
+
+        self.new_db_name_input.reset();
+        self.db_name_purpose = DbNamePurpose::Create;
+
+        if matches!(
+            self.active_pane,
+            ActivePane::NewDatabaseName | ActivePane::DatabaseList
+        ) {
+            self.scan_available_databases();
+            let index = self
+                .filtered_dbs
+                .iter()
+                .position(|d| d == &outcome.new_name)
+                .unwrap_or(0);
+            self.db_list_state.select(Some(index));
+            self.active_pane = ActivePane::DatabaseList;
+        }
     }
 
     pub(super) fn request_create_database(&mut self) -> Option<Command> {
@@ -1956,6 +3269,8 @@ impl Model {
     pub(super) fn apply_database_switch(&mut self, display_name: String) {
         self.active_db_name = display_name;
         self.active_pane = ActivePane::List;
+        self.nav_history.clear();
+        self.cancel_link_check();
         self.bookmark_items = BookmarkItems::default();
         self.tag_items = TagItems::default();
         self.all_tag_items = vec![];
@@ -2133,5 +3448,39 @@ impl Model {
         } else {
             self.cancel_note_edit();
         }
+    }
+}
+
+#[cfg(test)]
+mod tag_match_tests {
+    use super::tag_match_rank;
+
+    #[test]
+    fn prefix_matches_rank_first() {
+        assert_eq!(tag_match_rank("learn_networking", "lea"), Some(0));
+        assert_eq!(tag_match_rank("learn_networking", "learn_net"), Some(0));
+    }
+
+    #[test]
+    fn letters_further_along_in_order_also_match() {
+        assert_eq!(tag_match_rank("learn_networking", "leanet"), Some(1));
+        assert_eq!(tag_match_rank("learn_networking", "lework"), Some(1));
+        assert_eq!(tag_match_rank("learn_networking", "learking"), Some(1));
+        assert_eq!(tag_match_rank("learn_networking", "leaworking"), Some(1));
+    }
+
+    #[test]
+    fn must_start_with_the_same_letter_and_keep_order() {
+        assert_eq!(tag_match_rank("learn_networking", "net"), None);
+        assert_eq!(tag_match_rank("learn_networking", "lwn"), Some(1));
+        assert_eq!(tag_match_rank("learn_networking", "lnaer"), None);
+        assert_eq!(tag_match_rank("learn_networking", "leaz"), None);
+        assert_eq!(tag_match_rank("learn_networking", "x"), None);
+    }
+
+    #[test]
+    fn works_with_emoji_and_other_scripts() {
+        assert_eq!(tag_match_rank("🔥cool_stuff", "🔥st"), Some(1));
+        assert_eq!(tag_match_rank("सुरक्षा", "सक"), Some(1));
     }
 }

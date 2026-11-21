@@ -83,7 +83,7 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!(
                 "Checking for dead links",
-                "Use \"bmm check\" from the CLI to test\nyour saved bookmarks and find broken\nor dead links."
+                "Alt+B (capital B) in any list checks\nevery link shown and lists only the\nbroken ones, in red, with the reason\n(HTTP 404, domain not found, timed\nout...). Esc goes back (or cancels\na running check).\n\"bmm check\" does the same from the CLI."
             ),
             row!(
                 "Opening links",
@@ -387,6 +387,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
                 "(Tags field) Esc",
                 "Only while that suggestion box is\nshowing: close it without picking\nanything, without leaving this view."
             ),
+            row!(
+                "(Tags field) Alt+z",
+                "List ALL your tags as suggestions\n(matching ones first); pick several with\nUp/Down + Enter. Press again to go back\nto only the matching ones."
+            ),
             row!("Ctrl+s", "Save your changes (asks first)."),
             row!(
                 "(Title field) Alt+F",
@@ -414,6 +418,38 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             row!(
                 "Enter",
                 "Switch to the database under your\ncursor for this session (goes back to\nbmm.db next time you start bmm) - or,\nif you got here via \"m\"/\"M\", move the\nqueued bookmark(s) into it instead."
+            ),
+            row!(
+                "1-9",
+                "Jump straight to the database with\nthat number and switch to it."
+            ),
+            row!(
+                "Mouse / touch",
+                "In the database list and the folder\nviews, click (or tap) a row to jump to\nit, and use the scroll wheel to move.\n(To select text with the mouse, hold\nShift while dragging.)"
+            ),
+            row!(
+                "F",
+                "Open the folders view (also in Alt+m).\nFolders group your databases, eg. a\n\"learning\" folder holding your\nlearning_* databases. Nothing is made\non disk. Inside: C new folder, R rename,\nD delete (databases are kept), Enter\nopen; in a folder: Space marks\ndatabases, m moves them to another\nfolder, Enter switches to one."
+            ),
+            row!(
+                "Alt+<number>",
+                "Hold Alt and type a database number\nto jump to it, eg. Alt+1 Alt+2 = 12\n(applies when no longer number is\npossible, or after a short pause)."
+            ),
+            row!(
+                "Alt+Super+1..5",
+                "Order of the list: 1 your own order\n(see `a`), 2 names A-Z, 3 names Z-A,\n4 fewest links first, 5 most links first.\nNeeds a terminal that reports the Super\nkey (kitty, WezTerm, foot, Ghostty...)."
+            ),
+            row!(
+                "v",
+                "Same as above, works in any terminal:\nswitch to the next order, going round."
+            ),
+            row!(
+                "a",
+                "Arrange: Up/Down pick the number to\nmove the database to (the database\nthat had that number takes its old\nnumber), Enter/a saves, Esc cancels."
+            ),
+            row!(
+                "R",
+                "Rename the database under your cursor\n(bmm.db, the default, can't be renamed)."
             ),
             row!(
                 "/",

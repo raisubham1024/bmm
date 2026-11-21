@@ -1,8 +1,10 @@
-use super::common::{ActivePane, DbListPurpose, EditField};
+use super::common::{ActivePane, DbListPurpose, DbView, EditField, FolderListPurpose};
 use super::model::{Model, ModeOption, SearchScopeOption};
 use crate::domain::{SavedBookmark, TagStats};
 use crate::persistence::DBError;
-use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use sqlx::{Pool, Sqlite};
 use std::collections::HashSet;
 use std::io::Error as IOError;
@@ -66,6 +68,51 @@ pub enum Message {
     /// pressing its number key (1-9) in the database list, same idea as
     /// `SelectModeByNumber`.
     SelectDatabaseByNumber(usize),
+    /// A digit typed with Alt held down in the Database List view - used
+    /// to jump to databases numbered 10 and above (typing several digits
+    /// builds up the number, eg. Alt+1 then Alt+2 for 12).
+    AltDigitInDbList(char),
+    /// Fired by the event loop shortly after the last Alt+digit, which is
+    /// the point the typed number gets applied (terminals don't report
+    /// the Alt key being released, so a short pause stands in for it).
+    AltDigitTimeout,
+    /// Counts of bookmarks per database (name, count - `None` if that
+    /// database couldn't be read).
+    DatabaseCountsFetched(Vec<(String, Option<i64>)>),
+    /// Alt+B in a list of bookmarks: check which of the shown links are
+    /// broken.
+    StartLinkCheck,
+    LinkCheckProgress {
+        id: u64,
+        done: usize,
+    },
+    LinkCheckFinished(LinkCheckOutcome),
+    /// A row of the database / folder list was clicked (or tapped).
+    ClickListRow(usize),
+    /// Alt+Super+1..5 / `v` in the Database List view.
+    SetDbView(DbView),
+    CycleDbView,
+    /// Opens the folder list (`F`).
+    ShowFolders,
+    /// Enter in the folder list: open the folder, or (when picking a
+    /// destination) move the waiting databases into it.
+    EnterSelectedFolder,
+    SelectFolderByNumber(usize),
+    StartCreateFolder,
+    StartRenameFolder,
+    DeleteSelectedFolder,
+    /// Space in a folder: mark/unmark the database under cursor.
+    ToggleMarkDatabase,
+    /// `m` in a folder: choose the folder to move database(s) to.
+    StartMoveDatabases,
+    /// Enter in a folder: switch to the database under cursor.
+    SwitchToFolderDatabase,
+    SelectFolderDatabaseByNumber(usize),
+    StartArrangeDatabases,
+    ConfirmArrangeDatabases,
+    CancelArrangeDatabases,
+    StartRenameDatabase,
+    DatabaseRenamed(DatabaseRenameOutcome),
     StartNewDatabaseName,
     NewDatabaseNameGotEvent(Event),
     RequestCreateDatabase,
@@ -109,6 +156,8 @@ pub enum Message {
     EditFieldGotEvent(Event),
     EditFieldNext,
     EditFieldPrev,
+    /// Alt+z in the tags field.
+    ToggleAllTagSuggestions,
     TagSuggestionNext,
     TagSuggestionPrev,
     AcceptTagSuggestion,
@@ -131,7 +180,7 @@ pub enum Message {
     ToggleModeSwitcher,
     ConfirmModeSelection,
     /// Jumps straight to and opens the mode at this 0-based index in
-    /// `ModeOption::ALL` - fired by pressing its number key (1-8) in the
+    /// `ModeOption::ALL` - fired by pressing its number key (1-9) in the
     /// mode switcher, so the user doesn't have to move the selection down
     /// to it first and then press Enter.
     SelectModeByNumber(usize),
@@ -150,6 +199,29 @@ pub enum Message {
     /// page was reachable but had no description to use, in which case
     /// nothing happens.
     DescriptionFetched(Result<Option<String>, String>),
+}
+
+/// Result of a `Command::RenameDatabase`. `pool` is only set when the
+/// renamed database was the active one: it's the freshly opened pool on the
+/// new file if the rename worked, or a re-opened pool on the old file if it
+/// didn't - either way, the model must start using it, since the old pool
+/// was closed.
+pub struct DatabaseRenameOutcome {
+    pub old_name: String,
+    pub old_path: String,
+    pub new_name: String,
+    pub new_path: String,
+    pub error: Option<String>,
+    pub pool: Option<Pool<Sqlite>>,
+}
+
+/// Result of a `Command::CheckLinks`.
+pub struct LinkCheckOutcome {
+    pub id: u64,
+    pub checked: usize,
+    /// (uri, why it's broken) for every link that can't be opened.
+    pub broken: Vec<(String, String)>,
+    pub cancelled: bool,
 }
 
 pub enum UrlsOpenedResult {
@@ -216,6 +288,16 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         return Some(Message::RequestBackupDatabases);
                     }
 
+                    // Alt+B (capital B) checks which of the links shown in
+                    // the list are broken. Alt+b (lowercase) is still the
+                    // backup shortcut above.
+                    if key_event.modifiers.contains(KeyModifiers::ALT)
+                        && key_event.code == KeyCode::Char('B')
+                        && model.active_pane == ActivePane::List
+                    {
+                        return Some(Message::StartLinkCheck);
+                    }
+
                     // Alt+u checks for (and installs, if available) a
                     // newer bmm binary at every location bmm is found on
                     // PATH, same reasoning as Alt+m/Alt+n/Alt+g/Alt+b
@@ -224,6 +306,37 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         && key_event.code == KeyCode::Char('u')
                     {
                         return Some(Message::RequestCheckForUpdate);
+                    }
+
+                    // Alt+<digit> in the Database List view builds up a
+                    // database number (Alt+1 then Alt+2 = 12) and jumps to
+                    // that database - this is how databases numbered 10
+                    // and above are reached, since plain digit keys only
+                    // cover 1-9. Works from wherever the cursor happens
+                    // to be, and not while a database is being arranged.
+                    // Alt+Super+1..5 pick how the databases are ordered
+                    // (needs a terminal that reports the Super key, eg.
+                    // kitty, WezTerm, foot, Ghostty - `v` does the same
+                    // everywhere, one view at a time).
+                    if key_event
+                        .modifiers
+                        .contains(KeyModifiers::ALT | KeyModifiers::SUPER)
+                        && model.active_pane == ActivePane::DatabaseList
+                        && model.db_arrange_origin.is_none()
+                        && let KeyCode::Char(c) = key_event.code
+                        && let Some(view) = DbView::from_digit(c)
+                    {
+                        return Some(Message::SetDbView(view));
+                    }
+
+                    if key_event.modifiers.contains(KeyModifiers::ALT)
+                        && !key_event.modifiers.contains(KeyModifiers::SUPER)
+                        && model.active_pane == ActivePane::DatabaseList
+                        && model.db_arrange_origin.is_none()
+                        && let KeyCode::Char(c) = key_event.code
+                        && c.is_ascii_digit()
+                    {
+                        return Some(Message::AltDigitInDbList(c));
                     }
 
                     // Alt+s opens the search-scope popup, letting the
@@ -269,6 +382,7 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('S') => Some(Message::ShowStarred),
                         KeyCode::Char('*') => Some(Message::RequestToggleStar),
                         KeyCode::Char('A') => Some(Message::ShowDatabaseList),
+                        KeyCode::Char('F') => Some(Message::ShowFolders),
                         KeyCode::Char('z') => Some(Message::ShowGlobalSearch),
                         KeyCode::Char('e') => Some(Message::StartEditBookmark(false)),
                         KeyCode::Char('E') => Some(Message::StartEditBookmark(true)),
@@ -372,6 +486,14 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         _ => Some(Message::RenameTagInputGotEvent(event)),
                     },
                     ActivePane::EditBookmark => match key_event.code {
+                        // Alt+z in the tags field: every existing tag as a
+                        // suggestion; pressed again, back to matching ones
+                        KeyCode::Char('z')
+                            if key_event.modifiers.contains(KeyModifiers::ALT)
+                                && model.edit_focus == EditField::Tags =>
+                        {
+                            Some(Message::ToggleAllTagSuggestions)
+                        }
                         // While the tags field has live suggestions
                         // showing, Up/Down/Enter/Esc control the
                         // suggestion list instead of their usual
@@ -432,6 +554,73 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         }
                         _ => Some(Message::NoteInputGotEvent(event)),
                     },
+                    // While a database is being arranged (`a`), Up/Down
+                    // choose the number to move it to, Enter/`a` saves
+                    // and Esc cancels - nothing else is active.
+                    ActivePane::FolderList => match key_event.code {
+                        KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
+                        KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
+                        KeyCode::Char('g') => Some(Message::GoToFirstListItem),
+                        KeyCode::Char('G') => Some(Message::GoToLastListItem),
+                        KeyCode::Enter => Some(Message::EnterSelectedFolder),
+                        KeyCode::Char('C') => Some(Message::StartCreateFolder),
+                        KeyCode::Char('R')
+                            if model.folder_list_purpose == FolderListPurpose::Browse =>
+                        {
+                            Some(Message::StartRenameFolder)
+                        }
+                        KeyCode::Char('D')
+                            if model.folder_list_purpose == FolderListPurpose::Browse =>
+                        {
+                            Some(Message::DeleteSelectedFolder)
+                        }
+                        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                            let index = (c as usize) - ('1' as usize);
+                            if index < model.folder_rows().len() {
+                                Some(Message::SelectFolderByNumber(index))
+                            } else {
+                                None
+                            }
+                        }
+                        KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
+                        _ => None,
+                    },
+                    ActivePane::FolderContents => match key_event.code {
+                        KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
+                        KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
+                        KeyCode::Char('g') => Some(Message::GoToFirstListItem),
+                        KeyCode::Char('G') => Some(Message::GoToLastListItem),
+                        KeyCode::Enter => Some(Message::SwitchToFolderDatabase),
+                        KeyCode::Char(' ') => Some(Message::ToggleMarkDatabase),
+                        KeyCode::Char('m') => Some(Message::StartMoveDatabases),
+                        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                            let index = (c as usize) - ('1' as usize);
+                            if index < model.folder_dbs.len() {
+                                Some(Message::SelectFolderDatabaseByNumber(index))
+                            } else {
+                                None
+                            }
+                        }
+                        KeyCode::Esc | KeyCode::Char('q') => Some(Message::GoBackOrQuit),
+                        _ => None,
+                    },
+                    ActivePane::DatabaseList if model.db_arrange_origin.is_some() => {
+                        match key_event.code {
+                            KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
+                            KeyCode::Char('k') | KeyCode::Up => {
+                                Some(Message::GoToPreviousListItem)
+                            }
+                            KeyCode::Char('g') => Some(Message::GoToFirstListItem),
+                            KeyCode::Char('G') => Some(Message::GoToLastListItem),
+                            KeyCode::Enter | KeyCode::Char('a') => {
+                                Some(Message::ConfirmArrangeDatabases)
+                            }
+                            KeyCode::Esc | KeyCode::Char('q') => {
+                                Some(Message::CancelArrangeDatabases)
+                            }
+                            _ => None,
+                        }
+                    }
                     ActivePane::DatabaseList => match key_event.code {
                         KeyCode::Char('j') | KeyCode::Down => Some(Message::GoToNextListItem),
                         KeyCode::Char('k') | KeyCode::Up => Some(Message::GoToPreviousListItem),
@@ -447,6 +636,20 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('C') if model.db_list_purpose == DbListPurpose::Switch => {
                             Some(Message::StartNewDatabaseName)
                         }
+                        // `a` arranges (re-orders) the databases and `R`
+                        // renames the one under cursor - both only make
+                        // sense while switching databases, not while
+                        // picking a destination to move bookmark(s) into.
+                        KeyCode::Char('a') if model.db_list_purpose == DbListPurpose::Switch => {
+                            Some(Message::StartArrangeDatabases)
+                        }
+                        KeyCode::Char('R') if model.db_list_purpose == DbListPurpose::Switch => {
+                            Some(Message::StartRenameDatabase)
+                        }
+                        KeyCode::Char('F') if model.db_list_purpose == DbListPurpose::Switch => {
+                            Some(Message::ShowFolders)
+                        }
+                        KeyCode::Char('v') => Some(Message::CycleDbView),
                         // Number keys 1-9 jump straight to (and pick) the
                         // database shown next to that number in the list,
                         // same shortcut style as the mode switcher below -
@@ -534,6 +737,31 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                 _ => None,
             },
         },
+        Event::Mouse(mouse) => {
+            if model.terminal_too_small {
+                return None;
+            }
+
+            let clickable = matches!(
+                model.active_pane,
+                ActivePane::DatabaseList
+                    | ActivePane::DatabaseSearchInput
+                    | ActivePane::FolderList
+                    | ActivePane::FolderContents
+            );
+            if !clickable {
+                return None;
+            }
+
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => model
+                    .clicked_row(mouse.column, mouse.row)
+                    .map(Message::ClickListRow),
+                MouseEventKind::ScrollUp => Some(Message::GoToPreviousListItem),
+                MouseEventKind::ScrollDown => Some(Message::GoToNextListItem),
+                _ => None,
+            }
+        }
         Event::Resize(w, h) => Some(Message::TerminalResize(w, h)),
         _ => None,
     }

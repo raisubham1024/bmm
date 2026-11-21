@@ -9,14 +9,26 @@ const IMPORT_HELP: &str = include_str!("static/import-help.txt");
 /// bmm lets you get to your bookmarks in a flash
 #[derive(Parser, Debug)]
 #[command(long_about = LONG_ABOUT.trim())]
-#[command(version)]
+#[command(version = "3.0", disable_version_flag = true)]
 pub struct Args {
     /// Defaults to opening bmm's TUI when no subcommand is provided
     #[command(subcommand)]
     pub command: Option<BmmCommand>,
+    /// Print bmm's version
+    #[arg(short = 'v', long = "version", short_alias = 'V', action = clap::ArgAction::Version)]
+    version: Option<bool>,
     /// Override bmm's database location (default: <DATA_DIR>/bmm/bmm.db)
     #[arg(long = "db-path", value_name = "STRING", global = true)]
     pub db_path: Option<String>,
+    /// Use one of your databases by name (as shown in the TUI's database
+    /// list, eg. --db learning_linux), instead of the default bmm.db
+    #[arg(
+        long = "db",
+        value_name = "NAME",
+        global = true,
+        conflicts_with = "db_path"
+    )]
+    pub db: Option<String>,
     /// Output debug information without doing anything
     #[arg(long = "debug", global = true)]
     pub debug: bool,

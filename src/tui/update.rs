@@ -1,12 +1,41 @@
 use super::commands::Command;
 use super::common::*;
+use super::db_order::AltNumber;
 use super::message::{Message, UrlsOpenedResult};
 use super::model::*;
 use crate::persistence::{SearchScope, SearchTerms};
 use crate::self_update::UpdateOutcome;
-use tui_input::backend::crossterm::EventHandler;
+
+/// Messages that move to a different main view - Esc walks back through
+/// these, so the view being left is remembered first.
+fn is_forward_navigation(msg: &Message) -> bool {
+    matches!(
+        msg,
+        Message::ShowAllBookmarks
+            | Message::ShowStarred
+            | Message::ShowGlobalSearch
+            | Message::ToggleNoteSearch
+            | Message::ShowDatabaseList
+            | Message::ShowFolders
+            | Message::ShowGlobalTagsList
+            | Message::ShowBookmarksForTag
+            | Message::ShowView(ActivePane::TagsList)
+            | Message::ShowView(ActivePane::Help)
+            | Message::ShowView(ActivePane::SearchInput)
+    )
+}
 
 pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
+    if is_forward_navigation(&msg) {
+        // a running link check belongs to the list it was started from
+        model.cancel_link_check();
+    }
+
+    if !model.skip_nav_push && is_forward_navigation(&msg) {
+        let pane = model.active_pane;
+        model.push_nav_snapshot(pane);
+    }
+
     let mut cmds = Vec::new();
     match msg {
         Message::RequestBackupDatabases => {
@@ -170,10 +199,19 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             // mode-switcher-specific), and avoids `show_view`'s "coming
             // from Help" special case misfiring for a pane that isn't
             // actually Help.
+            // remember the view the mode switcher was opened from, since
+            // the pane is reset just below
+            let origin_pane = model.pane_before_mode_switch;
             model.active_pane = ActivePane::List;
 
             if let Some(mode) = selected_mode {
-                let follow_up_cmds = update(model, mode.into_message());
+                let message = mode.into_message();
+                if is_forward_navigation(&message) {
+                    model.push_nav_snapshot(origin_pane);
+                }
+                model.skip_nav_push = true;
+                let follow_up_cmds = update(model, message);
+                model.skip_nav_push = false;
                 cmds.extend(follow_up_cmds);
             }
         }
@@ -286,7 +324,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
         },
         Message::SearchInputGotEvent(event) => {
-            model.search_input.handle_event(&event);
+            handle_input_event(&mut model.search_input, &event);
             // Switch off the "initial" banner screen as soon as the user
             // starts typing, so the live results list is actually visible
             // underneath the search box (the banner screen doesn't render
@@ -298,7 +336,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             }
         }
         Message::TagSearchInputGotEvent(event) => {
-            model.tag_search_input.handle_event(&event);
+            handle_input_event(&mut model.tag_search_input, &event);
             model.filter_tags();
         }
         Message::SubmitTagSearch => {
@@ -343,6 +381,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                         if model.initial {
                             model.initial = false;
                         }
+                        model.search_results_from_home = model.nav_history.is_empty();
                         model.search_input.reset();
                         model.active_pane = ActivePane::List;
                     }
@@ -430,7 +469,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             model.start_rename_selected_tag();
         }
         Message::RenameTagInputGotEvent(event) => {
-            model.rename_tag_input.handle_event(&event);
+            handle_input_event(&mut model.rename_tag_input, &event);
             model.recompute_rename_tag_suggestions();
         }
         Message::RenameTagSuggestionNext => model.rename_tag_suggestion_next(),
@@ -447,6 +486,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         }
         Message::TagRenamed(old_name, new_name, result) => match result {
             Ok(count) => {
+                model.clear_nav_history();
                 let word = if count == 1 { "bookmark" } else { "bookmarks" };
                 model.user_message = Some(
                     UserMessage::info(&format!(
@@ -510,6 +550,126 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         },
         Message::ShowDatabaseList => {
             model.show_database_list();
+            cmds.push(Command::FetchDatabaseCounts {
+                active_db_name: model.active_db_name.clone(),
+            });
+        }
+        Message::DatabaseCountsFetched(counts) => {
+            model.apply_db_counts(counts);
+        }
+        Message::AltDigitInDbList(c) => match model.push_alt_digit(c) {
+            Some(AltNumber::Jump(index)) => {
+                let follow_up_cmds = update(model, Message::SelectDatabaseByNumber(index));
+                cmds.extend(follow_up_cmds);
+            }
+            Some(AltNumber::Invalid) => {
+                model.user_message = Some(UserMessage::error("no database has this number"));
+            }
+            Some(AltNumber::Wait) | None => {}
+        },
+        Message::SetDbView(view) => model.set_db_view(view),
+        Message::CycleDbView => model.cycle_db_view(),
+        Message::AltDigitTimeout => {
+            if let Some(index) = model.take_expired_alt_number() {
+                let follow_up_cmds = update(model, Message::SelectDatabaseByNumber(index));
+                cmds.extend(follow_up_cmds);
+            }
+        }
+        Message::ClickListRow(index) => match model.active_pane {
+            ActivePane::DatabaseList | ActivePane::DatabaseSearchInput => {
+                if model.db_arrange_origin.is_some() {
+                    // while arranging, a click picks the number to move to
+                    model.db_list_state.select(Some(index));
+                } else {
+                    let follow_up_cmds = update(model, Message::SelectDatabaseByNumber(index));
+                    cmds.extend(follow_up_cmds);
+                }
+            }
+            ActivePane::FolderList => {
+                let follow_up_cmds = update(model, Message::SelectFolderByNumber(index));
+                cmds.extend(follow_up_cmds);
+            }
+            ActivePane::FolderContents => {
+                let follow_up_cmds = update(model, Message::SelectFolderDatabaseByNumber(index));
+                cmds.extend(follow_up_cmds);
+            }
+            _ => {}
+        },
+        Message::ShowFolders => {
+            model.show_folders();
+            cmds.push(Command::FetchDatabaseCounts {
+                active_db_name: model.active_db_name.clone(),
+            });
+        }
+        Message::EnterSelectedFolder => model.enter_selected_folder(),
+        Message::SelectFolderByNumber(index) => {
+            model.folder_list_state.select(Some(index));
+            model.enter_selected_folder();
+        }
+        Message::StartCreateFolder => model.start_create_folder(),
+        Message::StartRenameFolder => model.start_rename_folder(),
+        Message::DeleteSelectedFolder => model.delete_selected_folder(),
+        Message::ToggleMarkDatabase => model.toggle_mark_selected_db(),
+        Message::StartMoveDatabases => model.start_move_databases(),
+        Message::SwitchToFolderDatabase => {
+            if let Some(c) = model.request_switch_to_folder_db() {
+                cmds.push(c);
+            }
+        }
+        Message::SelectFolderDatabaseByNumber(index) => {
+            model.folder_dbs_state.select(Some(index));
+            if let Some(c) = model.request_switch_to_folder_db() {
+                cmds.push(c);
+            }
+        }
+        Message::StartLinkCheck => {
+            if let Some(c) = model.start_link_check() {
+                cmds.push(c);
+            }
+        }
+        Message::LinkCheckProgress { id, done } => {
+            model.apply_link_check_progress(id, done);
+        }
+        Message::LinkCheckFinished(outcome) => {
+            model.apply_link_check_result(outcome);
+        }
+        Message::StartArrangeDatabases => {
+            model.start_arrange_databases();
+        }
+        Message::ConfirmArrangeDatabases => {
+            model.confirm_arrange_databases();
+        }
+        Message::CancelArrangeDatabases => {
+            model.cancel_arrange_databases();
+        }
+        Message::StartRenameDatabase => {
+            model.start_rename_database();
+        }
+        Message::DatabaseRenamed(outcome) => {
+            model.db_rename_in_flight = false;
+            let mut outcome = outcome;
+
+            if let Some(new_pool) = outcome.pool.take() {
+                model.pool = new_pool;
+            }
+
+            match &outcome.error {
+                Some(e) => {
+                    model.user_message = Some(UserMessage::error(&format!(
+                        "couldn't rename database: {e}"
+                    )));
+                }
+                None => {
+                    model.apply_database_renamed(&outcome);
+                    model.user_message = Some(
+                        UserMessage::info(&format!("renamed to \"{}\"!", outcome.new_name))
+                            .with_frames_left(1),
+                    );
+                    cmds.push(Command::FetchDatabaseCounts {
+                        active_db_name: model.active_db_name.clone(),
+                    });
+                }
+            }
         }
         Message::RequestSwitchDatabase => match model.db_list_purpose {
             DbListPurpose::Switch => {
@@ -530,7 +690,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             cmds.extend(follow_up_cmds);
         }
         Message::DatabaseSearchInputGotEvent(event) => {
-            model.db_search_input.handle_event(&event);
+            handle_input_event(&mut model.db_search_input, &event);
             model.filter_databases();
         }
         Message::SubmitDatabaseSearch => {
@@ -543,10 +703,18 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             model.start_new_database_name();
         }
         Message::NewDatabaseNameGotEvent(event) => {
-            model.new_db_name_input.handle_event(&event);
+            handle_input_event(&mut model.new_db_name_input, &event);
         }
         Message::RequestCreateDatabase => {
-            if let Some(c) = model.request_create_database() {
+            let cmd = match model.db_name_purpose {
+                DbNamePurpose::Create => model.request_create_database(),
+                DbNamePurpose::Rename(_) => model.request_rename_database(),
+                DbNamePurpose::CreateFolder | DbNamePurpose::RenameFolder(_) => {
+                    model.submit_folder_name();
+                    None
+                }
+            };
+            if let Some(c) = cmd {
                 cmds.push(c);
             }
         }
@@ -595,9 +763,19 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         }
         Message::RequestMoveSelectedBookmark => {
             model.start_move_selected_bookmark();
+            if model.active_pane == ActivePane::DatabaseList {
+                cmds.push(Command::FetchDatabaseCounts {
+                    active_db_name: model.active_db_name.clone(),
+                });
+            }
         }
         Message::RequestMoveMarkedBookmarks => {
             model.start_move_marked_bookmarks();
+            if model.active_pane == ActivePane::DatabaseList {
+                cmds.push(Command::FetchDatabaseCounts {
+                    active_db_name: model.active_db_name.clone(),
+                });
+            }
         }
         Message::ToggleMarkForMove => {
             model.toggle_mark_for_move();
@@ -680,6 +858,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         }
         Message::BookmarksDeleted(result) => match result {
             Ok(count) => {
+                model.clear_nav_history();
                 model.bookmark_items = BookmarkItems::default();
                 model.marked_uris.clear();
                 let word = if count == 1 { "link" } else { "links" };
@@ -708,13 +887,13 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         }
         Message::EditFieldGotEvent(event) => match model.edit_focus {
             EditField::Uri => {
-                model.edit_uri_input.handle_event(&event);
+                handle_input_event(&mut model.edit_uri_input, &event);
             }
             EditField::Title => {
-                model.edit_title_input.handle_event(&event);
+                handle_input_event(&mut model.edit_title_input, &event);
             }
             EditField::Tags => {
-                model.edit_tags_input.handle_event(&event);
+                handle_input_event(&mut model.edit_tags_input, &event);
                 model.recompute_tag_suggestions();
             }
         },
@@ -724,6 +903,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         Message::TagSuggestionPrev => model.tag_suggestion_previous(),
         Message::AcceptTagSuggestion => model.accept_selected_tag_suggestion(),
         Message::DismissTagSuggestions => model.dismiss_tag_suggestions(),
+        Message::ToggleAllTagSuggestions => model.toggle_all_tag_suggestions(),
         Message::RequestSaveBookmarkEdit => {
             model.request_save_edit();
         }
@@ -752,6 +932,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                     }
                 };
                 let was_new = model.edit_is_new;
+                model.clear_nav_history();
                 model.apply_bookmark_edit_locally(new_uri, title, tags);
                 model.cancel_edit();
                 let msg = if was_new { "bookmark saved!" } else { "bookmark updated!" };
@@ -790,7 +971,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             }
         }
         Message::NoteInputGotEvent(event) => {
-            model.note_input.handle_event(&event);
+            handle_input_event(&mut model.note_input, &event);
         }
         Message::RequestSaveNote => {
             model.request_save_note();

@@ -1,13 +1,13 @@
 use super::commands::Command;
-use super::message::{Message, UrlsOpenedResult};
+use super::message::{DatabaseRenameOutcome, LinkCheckOutcome, Message, UrlsOpenedResult};
 use crate::common::DEFAULT_LIMIT;
 use crate::domain::{DraftBookmark, PotentialBookmark, Tag};
 use crate::persistence::{
-    DBError, SaveBookmarkOptions, create_or_update_bookmark, delete_bookmarks_with_uris,
-    get_all_bookmarks, get_bookmark_with_exact_uri, get_bookmarks, get_bookmarks_by_query,
-    get_bookmarks_with_notes, get_db_pool, get_note, get_starred_bookmarks, get_starred_uris,
-    get_tags_with_stats, rename_bookmark_uri, rename_tag_name, set_note, set_starred,
-    toggle_starred,
+    DBError, SaveBookmarkOptions, count_bookmarks, create_or_update_bookmark,
+    delete_bookmarks_with_uris, get_all_bookmarks, get_bookmark_with_exact_uri, get_bookmarks,
+    get_bookmarks_by_query, get_bookmarks_with_notes, get_db_pool, get_note, get_starred_bookmarks,
+    get_starred_uris, get_tags_with_stats, rename_bookmark_uri, rename_tag_name, set_note,
+    set_starred, toggle_starred,
 };
 use sqlx::{Pool, Sqlite};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -182,6 +182,105 @@ pub(super) async fn handle_command(
                     .map(|new_pool| (new_pool, display_name))
                     .map_err(|e| format!("{e}"));
                 let _ = event_tx.try_send(Message::DatabaseSwitched(result));
+            });
+        }
+        Command::CheckLinks { id, uris, cancel } => {
+            tokio::spawn(run_link_check(id, uris, cancel, event_tx));
+        }
+        Command::FetchDatabaseCounts { active_db_name } => {
+            let active_pool = pool.clone();
+            tokio::spawn(async move {
+                let mut counts: Vec<(String, Option<i64>)> = Vec::new();
+                let mut active_counted = false;
+
+                for (name, path) in local_db_files() {
+                    let count = if name == active_db_name {
+                        active_counted = true;
+                        count_bookmarks(&active_pool).await.ok()
+                    } else {
+                        match get_db_pool(&path).await {
+                            Ok(db_pool) => {
+                                let result = count_bookmarks(&db_pool).await.ok();
+                                db_pool.close().await;
+                                result
+                            }
+                            Err(_) => None,
+                        }
+                    };
+                    counts.push((name, count));
+                }
+
+                // the active database might live outside bmm's data
+                // directory (--db-path), in which case it wasn't in the
+                // directory listing above
+                if !active_counted {
+                    counts.push((active_db_name, count_bookmarks(&active_pool).await.ok()));
+                }
+
+                let _ = event_tx.try_send(Message::DatabaseCountsFetched(counts));
+            });
+        }
+        Command::RenameDatabase {
+            old_name,
+            old_path,
+            new_name,
+            new_path,
+            is_active,
+        } => {
+            let active_pool = pool.clone();
+            tokio::spawn(async move {
+                let mut error: Option<String> = None;
+                let mut new_pool: Option<Pool<Sqlite>> = None;
+
+                // the active database's connections have to be closed
+                // before its file is renamed, and re-opened afterwards
+                if is_active {
+                    active_pool.close().await;
+                }
+
+                match std::fs::rename(&old_path, &new_path) {
+                    Ok(()) => {
+                        if is_active {
+                            match get_db_pool(&new_path).await {
+                                Ok(p) => new_pool = Some(p),
+                                Err(e) => {
+                                    error = Some(format!(
+                                        "renamed, but couldn't re-open it: {e} (restart bmm)"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error = Some(e.to_string());
+                        // nothing was renamed - bring the active database
+                        // back to life on its old file
+                        if is_active {
+                            match get_db_pool(&old_path).await {
+                                Ok(p) => new_pool = Some(p),
+                                Err(e2) => {
+                                    error = Some(format!(
+                                        "{e}; also couldn't re-open the database: {e2} (restart bmm)"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // `send().await` rather than `try_send`: this message carries
+                // the pool the app must switch to, so it can't be dropped
+                // if the queue happens to be full right now
+                let _ = event_tx
+                    .send(Message::DatabaseRenamed(DatabaseRenameOutcome {
+                        old_name,
+                        old_path,
+                        new_name,
+                        new_path,
+                        error,
+                        pool: new_pool,
+                    }))
+                    .await;
             });
         }
         Command::DeleteBookmark(uri, target_db_path) => {
@@ -700,4 +799,83 @@ async fn open_urls_and_report(
     };
 
     let _ = event_tx.try_send(message);
+}
+
+/// Checks the links with a few at a time (same defaults as `bmm check`),
+/// reporting progress as it goes and the broken ones at the end.
+async fn run_link_check(
+    id: u64,
+    uris: Vec<String>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    event_tx: Sender<Message>,
+) {
+    use crate::cli::check::{LinkStatus, build_client, check_link};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const CONCURRENCY: usize = 25;
+    const TIMEOUT_SECS: u64 = 8;
+
+    let checked = uris.len();
+
+    let client = match build_client(TIMEOUT_SECS) {
+        Ok(c) => c,
+        Err(_) => {
+            // can't check anything without an http client: report every
+            // link as unchecked rather than as broken
+            let _ = event_tx
+                .send(Message::LinkCheckFinished(LinkCheckOutcome {
+                    id,
+                    checked,
+                    broken: vec![],
+                    cancelled: true,
+                }))
+                .await;
+            return;
+        }
+    };
+
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(CONCURRENCY));
+    let done = std::sync::Arc::new(AtomicUsize::new(0));
+    let mut tasks = tokio::task::JoinSet::new();
+
+    for uri in uris {
+        let client = client.clone();
+        let semaphore = semaphore.clone();
+        let cancel = cancel.clone();
+        let done = done.clone();
+        let event_tx = event_tx.clone();
+
+        tasks.spawn(async move {
+            let _permit = semaphore.acquire_owned().await.ok()?;
+
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
+
+            let status = check_link(&client, &uri).await;
+            let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
+            let _ = event_tx.try_send(Message::LinkCheckProgress { id, done: finished });
+
+            match status {
+                LinkStatus::Broken(reason) => Some((uri, reason)),
+                LinkStatus::Ok(_) | LinkStatus::Skipped(_) => None,
+            }
+        });
+    }
+
+    let mut broken: Vec<(String, String)> = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        if let Ok(Some(entry)) = result {
+            broken.push(entry);
+        }
+    }
+
+    let _ = event_tx
+        .send(Message::LinkCheckFinished(LinkCheckOutcome {
+            id,
+            checked,
+            broken,
+            cancelled: cancel.load(Ordering::Relaxed),
+        }))
+        .await;
 }

@@ -34,9 +34,34 @@ pub(super) enum Command {
     FetchStarredBookmarks,
     FetchStarredUris,
     ToggleStar(String),
+    /// Checks whether each link opens (Alt+B). Progress and the final
+    /// result come back as messages carrying `id`; setting `cancel` stops
+    /// the check early.
+    CheckLinks {
+        id: u64,
+        uris: Vec<String>,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    },
     SwitchDatabase {
         path: String,
         display_name: String,
+    },
+    /// Counts the bookmarks in every local database, for the "[ <count> ]"
+    /// shown next to each one in the Database List view. `active_db_name`
+    /// is the database currently open, which is counted through the
+    /// already-open connection pool.
+    FetchDatabaseCounts {
+        active_db_name: String,
+    },
+    /// Renames a database file (`R` in the Database List view). If it's
+    /// the active database, its connection pool is closed first and
+    /// re-opened on the new file afterwards.
+    RenameDatabase {
+        old_name: String,
+        old_path: String,
+        new_name: String,
+        new_path: String,
+        is_active: bool,
     },
     /// Same `scope` idea as `SearchBookmarks`, applied to every local
     /// database at once.

@@ -254,7 +254,8 @@ so if you search like `wiki demo rust` so suppose you saved a bookmark, where **
 | key            | Description                                                                          |
 | -------------- | ------------------------------------------------------------------------------------ |
 | ?              | show/hide help view                                                                  |
-| Esc            | one step back to previous mode 💁 2 times pressing 'Esc' also exit from the bmm tool |
+| Esc            | go back one step through the views you visited (e.g. links of a tag -> tags list -> the view you started from); exits only when there is nothing left to go back to |
+| Alt + B (capital) | check the links shown in the current list; shows only the broken ones in red with the reason (404, DNS error, timeout...). `Esc` goes back |
 | q              | exit from the bmm tool                                                               |
 | Down arrow / j | go down in a list                                                                    |
 | Up arrow / k   | go up in a list                                                                      |
@@ -349,6 +350,16 @@ so if you search like `wiki demo rust` so suppose you saved a bookmark, where **
 | --- | --- |
 |   Enter  |   switch to the database under cursor for this session ( ℹ️ when you open bmm it bydefault select the `bmm.db` database ) |
 |  C   |  create a new database  and then "ctrl+s" to save |
+|  1-9   |  jump to that numbered database and switch to it |
+|  Alt + number   |  hold Alt and type a database number to jump to it (e.g. `Alt+1` `Alt+2` = 12); applies right away when no longer number is possible, otherwise after a short pause |
+|  Alt + Super + 1 .. 5   |  order of the list: 1 your own order (default), 2 names A-Z, 3 names Z-A, 4 fewest links first, 5 most links first. Needs a terminal that reports the Super key (kitty, WezTerm, foot, Ghostty...) and a desktop that doesn't grab the shortcut |
+|  v   |  same, but works everywhere: switch to the next order, going round the five |
+|  a   |  arrange: Up/Down choose the new number, Enter/`a` save, Esc cancel (the database that had that number takes the moved one's old number) |
+|  R   |  rename the database under cursor (`bmm.db`, the default, can't be renamed) |
+|  F   |  folders view: group databases into folders (names can have emoji). `C` new folder, `R` rename, `D` delete (databases are kept), `Enter` open; inside a folder `Space` marks databases, `m` moves them to another folder, `Enter` switches to the database |
+|  Ctrl + u / Ctrl + k   |  in any text field: delete everything left / right of the cursor |
+
+> Each database shows `[ <count> ]` (its number of links), and the header shows the total across all databases.
 |  Esc   |   go back  |
 
 
@@ -368,3 +379,35 @@ I didn't add a delete option for databases to avoid accidental deletion. But if 
 
 
 
+
+
+## Using a specific database from the command line
+
+Every command works on `bmm.db` unless told otherwise. Use `--db <NAME>` to
+run it on any of your databases, e.g. `bmm tags rename cyber cyber_security --db learning_linux`
+(`bmm list --db work`, `bmm save <url> --db work`, ...). If a tag isn't found in the
+current database, bmm tells you which other databases have it.
+
+
+## Mouse / touch
+
+In the database list and in the folders view (`F`), click (or tap) a row to jump to it - a database
+switches to it, a folder opens - and the scroll wheel moves the cursor. To select text with the mouse
+in your terminal, hold `Shift` while dragging.
+
+## Version
+
+`bmm -v` (or `bmm --version`) prints `bmm 3.0`.
+
+
+## Tag suggestions
+
+While typing tags (add/edit a link, tag search, tag rename) bmm suggests your existing tags. Besides
+tags that start with what you typed, it also finds tags containing your letters in the same order,
+starting from the first letter: with a tag `learn_networking`, typing `lea`, `leanet`, `lework` or
+`learking` all suggest it. Tags that start with what you typed are listed first.
+
+In the tags field of the add/edit screen, `Alt+z` lists *all* your tags as suggestions (the ones
+matching what you typed come first); pick with Up/Down + Enter, and the list stays open so you can pick
+several. Press `Alt+z` again (or `Esc`) to go back to only the matching ones. The tag search in the tags
+list (`t`, then `/`) uses the same matching, so `leanet` finds `learn_networking` there too.

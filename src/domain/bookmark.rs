@@ -1,4 +1,4 @@
-use super::tags::{TAG_REGEX_STR, Tag};
+use super::tags::{TAG_RULES_STR, Tag};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -98,7 +98,7 @@ pub enum DraftBookmarkError {
     CouldntParseUri(ParseError),
     #[error("title is too long: {0} (max: {TITLE_MAX_LENGTH})")]
     TitleTooLong(usize),
-    #[error("tags {0:?} are invalid (valid regex: {TAG_REGEX_STR})")]
+    #[error("tags {0:?} are invalid (allowed: {TAG_RULES_STR})")]
     TagIsInvalid(Vec<String>),
 }
 
@@ -298,7 +298,7 @@ impl DraftBookmark {
     }
 }
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct SavedBookmark {
     pub uri: String,
     pub title: Option<String>,

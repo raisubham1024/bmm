@@ -1,5 +1,6 @@
 use super::common::*;
 use super::help_content::HELP_SECTIONS;
+use super::folders::UNFILED_LABEL;
 use super::model::{MessageKind, ModeOption, Model, SearchScopeOption};
 use crate::persistence::SearchScope;
 use ratatui::{
@@ -7,10 +8,13 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Cell, List, ListDirection, ListItem, ListState, Padding, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, List, ListDirection, ListItem, ListState, Padding, Paragraph, Row, Table},
 };
 
 pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
+    // set again by the lists that can be clicked, when they're drawn
+    model.click_area = None;
+
     if model.terminal_too_small {
         render_terminal_too_small_view(&model.terminal_dimensions, frame);
         return;
@@ -40,6 +44,8 @@ pub(crate) fn view(model: &mut Model, frame: &mut Frame) {
         ActivePane::DatabaseList => render_database_list_view(model, frame, false),
         ActivePane::DatabaseSearchInput => render_database_list_view(model, frame, true),
         ActivePane::NewDatabaseName => render_new_database_name_view(model, frame),
+        ActivePane::FolderList => render_folder_list_view(model, frame),
+        ActivePane::FolderContents => render_folder_contents_view(model, frame),
         ActivePane::Confirm => render_confirm_view(model, frame),
         ActivePane::ModeSwitcher => render_mode_switcher_view(model, frame),
         ActivePane::SearchScopePicker => render_search_scope_picker_view(model, frame),
@@ -116,6 +122,21 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                     " no bookmarks ",
                     Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR),
                 ));
+            } else if model
+                .bookmark_items
+                .items
+                .iter()
+                .any(|i| i.broken_reason.is_some())
+            {
+                header_components.push(Span::styled(
+                    " broken links ",
+                    Style::new().bold().bg(ratatui::style::Color::Red).fg(FG_COLOR),
+                ));
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    format!("({})", model.bookmark_items.items.len()),
+                    Style::new().fg(ratatui::style::Color::Red),
+                ));
             } else {
                 header_components.push(Span::styled(
                     " bookmarks ",
@@ -125,6 +146,14 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                 header_components.push(Span::styled(
                     format!("({})", model.bookmark_items.items.len()),
                     Style::new().fg(COLOR_THREE),
+                ));
+            }
+
+            if let Some(check) = &model.link_check {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    format!(" checking links {}/{} ", check.done, check.total),
+                    Style::new().bold().bg(HELP_COLOR).fg(FG_COLOR),
                 ));
             }
 
@@ -208,12 +237,91 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                 text,
                 Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
             ));
+
+            // total number of bookmarks across every database
+            header_components.push(Span::from(" "));
+            header_components.push(Span::styled(
+                match model.total_db_count() {
+                    Some((total, true)) => format!("({total})"),
+                    Some((total, false)) => format!("({total}+)"),
+                    None => "(...)".to_string(),
+                },
+                Style::new().fg(COLOR_THREE),
+            ));
+
+            if model.db_arrange_origin.is_some() {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    " arranging ",
+                    Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR),
+                ));
+            }
+
+            header_components.push(Span::from(" "));
+            header_components.push(Span::styled(
+                format!("[{}]", model.db_view.label()),
+                Style::new().fg(COLOR_THREE),
+            ));
+
+            if !model.alt_number_buffer.is_empty() {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    format!(" jump to: {}_ ", model.alt_number_buffer),
+                    Style::new().bold().bg(HELP_COLOR).fg(FG_COLOR),
+                ));
+            }
         }
         ActivePane::NewDatabaseName => {
+            let text = match model.db_name_purpose {
+                DbNamePurpose::Create => " new database ".to_string(),
+                DbNamePurpose::Rename(ref old) => format!(" renaming database \"{old}\" "),
+                DbNamePurpose::CreateFolder => " new folder ".to_string(),
+                DbNamePurpose::RenameFolder(ref old) => format!(" renaming folder \"{old}\" "),
+            };
             header_components.push(Span::styled(
-                " new database ",
+                text,
                 Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
             ));
+        }
+        ActivePane::FolderList => {
+            let (label, color) = match model.folder_list_purpose {
+                FolderListPurpose::Browse => (" folders ".to_string(), COLOR_TWO),
+                FolderListPurpose::MoveDatabases => (
+                    format!(" move {} to folder ", database_count_label(model.folder_move_names.len())),
+                    COLOR_TWO,
+                ),
+            };
+            header_components.push(Span::styled(
+                label,
+                Style::new().bold().bg(color).fg(FG_COLOR),
+            ));
+            header_components.push(Span::from(" "));
+            header_components.push(Span::styled(
+                format!("({})", model.folders.folders.len()),
+                Style::new().fg(COLOR_THREE),
+            ));
+        }
+        ActivePane::FolderContents => {
+            let label = match &model.folder_open {
+                Some(name) => format!(" folder: {name} "),
+                None => format!(" databases in {UNFILED_LABEL} "),
+            };
+            header_components.push(Span::styled(
+                label,
+                Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+            ));
+            header_components.push(Span::from(" "));
+            header_components.push(Span::styled(
+                format!("({})", model.folder_dbs.len()),
+                Style::new().fg(COLOR_THREE),
+            ));
+            if !model.marked_dbs.is_empty() {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    format!(" {} marked ", model.marked_dbs.len()),
+                    Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+                ));
+            }
         }
         ActivePane::Confirm => {
             header_components.push(Span::styled(
@@ -352,12 +460,24 @@ fn render_bookmarks_list(model: &mut Model, frame: &mut Frame, chunk: Rect) {
         .map(ListItem::from)
         .collect();
 
+    // the broken-links view (Alt+B) stays red even on the selected row
+    let highlight_color = if model
+        .bookmark_items
+        .items
+        .iter()
+        .any(|i| i.broken_reason.is_some())
+    {
+        ratatui::style::Color::Red
+    } else {
+        PRIMARY_COLOR
+    };
+
     let list = List::new(items)
         .block(Block::new().padding(Padding::new(0, 0, 1, 1)))
         .style(Style::new().white())
         .highlight_symbol("> ")
         .repeat_highlight_symbol(true)
-        .highlight_style(Style::new().fg(PRIMARY_COLOR))
+        .highlight_style(Style::new().fg(highlight_color).bold())
         .direction(ListDirection::TopToBottom);
 
     frame.render_stateful_widget(&list, chunk, &mut model.bookmark_items.state);
@@ -652,7 +772,9 @@ fn tag_suggestion_box_height(model: &Model) -> u16 {
         return 0;
     }
 
-    let wanted = model.tag_suggestions.len() as u16 + 2;
+    // with every tag listed (Alt+z) the box shows a window of the list and
+    // scrolls, rather than growing with the number of tags
+    let wanted = model.tag_suggestions.len().min(8) as u16 + 2;
 
     // header(2) + uri(3) + title(3) + tags(3) + status(1) + a floor of 4
     // rows kept free for the bookmarks list above.
@@ -707,7 +829,11 @@ fn render_tag_suggestions_box(model: &Model, frame: &mut Frame, chunk: Rect) {
         .block(
             Block::bordered()
                 .border_style(Style::default().fg(PRIMARY_COLOR))
-                .title(" matching tags (\u{2191}/\u{2193}, Enter to pick) ")
+                .title(if model.tag_suggest_all {
+                    " all tags (\u{2191}/\u{2193}, Enter to pick, Alt+z: only matching) "
+                } else {
+                    " matching tags (\u{2191}/\u{2193}, Enter to pick, Alt+z: all tags) "
+                })
                 .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
         )
         .highlight_symbol("> ")
@@ -861,7 +987,7 @@ fn render_edit_tags_field(model: &Model, frame: &mut Frame, chunk: Rect) {
     let scroll = model.edit_tags_input.visual_scroll(width as usize);
 
     let title = if focused {
-        " Tags, comma separated (Tab: switch, Ctrl+s: save, Esc: cancel) "
+        " Tags, comma separated (Alt+z: all tags, Tab: switch, Ctrl+s: save, Esc: cancel) "
     } else {
         " Tags, comma separated "
     };
@@ -1066,45 +1192,73 @@ fn render_database_list_view(model: &mut Model, frame: &mut Frame, search: bool)
 
     render_header(model, frame, layout[0]);
 
-    let items: Vec<ListItem> = model
-        .filtered_dbs
+    // every database gets a number: 1-9 are reached by pressing the digit,
+    // 10 and above with Alt+<digits> (and everything with j/k/Enter)
+    let displayed = model.displayed_dbs();
+    let number_width = displayed.len().to_string().len();
+    let name_width = displayed
+        .iter()
+        .map(|name| display_width(name))
+        .max()
+        .unwrap_or(0);
+    let arranging_at = model.db_arrange_origin.and(model.selected_db_index());
+
+    let items: Vec<ListItem> = displayed
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            // Only the first 9 databases get a number prefix, since there's
-            // no single digit key left to jump to entries past that - they
-            // stay reachable with j/k/Enter as before, just without the
-            // number shortcut.
-            let prefix = if i < 9 {
-                format!("{}. ", i + 1)
-            } else {
-                String::new()
+            let count = match model.db_counts.get(name) {
+                Some(Some(n)) => format!("[ {n} ]"),
+                Some(None) => "[ ? ]".to_string(),
+                None if model.db_counts_loaded => "[ ? ]".to_string(),
+                None => "[ ... ]".to_string(),
             };
-            if name == &model.active_db_name {
-                ListItem::new(Line::styled(
-                    format!("* {prefix}{name} (active)"),
-                    Style::new().fg(PRIMARY_COLOR).bold(),
-                ))
+            let is_active = name == &model.active_db_name;
+            let marker = if arranging_at == Some(i) {
+                "~ "
+            } else if is_active {
+                "* "
             } else {
-                ListItem::new(Line::from(format!("  {prefix}{name}")))
+                "  "
+            };
+            let suffix = if is_active { " (active)" } else { "" };
+            let text = format!(
+                "{marker}{number:>number_width$}. {name}    {count}{suffix}",
+                number = i + 1,
+                name = pad_to_width(name, name_width),
+            );
+
+            if arranging_at == Some(i) {
+                ListItem::new(Line::styled(text, Style::new().bold()))
+            } else if is_active {
+                ListItem::new(Line::styled(text, Style::new().fg(PRIMARY_COLOR).bold()))
+            } else {
+                ListItem::new(Line::from(text))
             }
         })
         .collect();
 
-    let title = match model.db_list_purpose {
-        DbListPurpose::Switch => {
-            " databases (1-9/Enter: switch, /: search, C: create new, Esc: back) "
+    let title = if model.db_arrange_origin.is_some() {
+        " arrange (Up/Down: pick the number, Enter/a: save, Esc: cancel) "
+    } else {
+        match model.db_list_purpose {
+            DbListPurpose::Switch => {
+                " databases (click/1-9/Enter: switch, Alt+n: 10+, v: view, a: arrange, R: rename, C: new) "
+            }
+            DbListPurpose::Move => {
+                " move to database (1-9/Alt+n/Enter: choose, v: view, /: search, Esc: cancel) "
+            }
         }
-        DbListPurpose::Move => " move to database (1-9/Enter: choose, /: search, Esc: cancel) ",
     };
 
+    let block = Block::bordered()
+        .border_style(Style::default().fg(COLOR_TWO))
+        .title(title)
+        .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR));
+    model.click_area = Some(block.inner(layout[1]));
+
     let list = List::new(items)
-        .block(
-            Block::bordered()
-                .border_style(Style::default().fg(COLOR_TWO))
-                .title(title)
-                .title_style(Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR)),
-        )
+        .block(block)
         .highlight_style(Style::new().bg(COLOR_TWO).fg(FG_COLOR))
         .direction(ListDirection::TopToBottom);
 
@@ -1150,10 +1304,19 @@ fn render_new_database_name_view(model: &Model, frame: &mut Frame) {
 
     render_header(model, frame, layout[0]);
 
-    let hint = Paragraph::new(
-        "Enter a name for the new database. A file with this name (plus\n.db) will be created in ~/.local/share/bmm/",
-    )
-    .style(Style::new().white());
+    let hint_text = match &model.db_name_purpose {
+        DbNamePurpose::Create => "Enter a name for the new database. A file with this name (plus\n.db) will be created in ~/.local/share/bmm/".to_string(),
+        DbNamePurpose::Rename(old) => format!(
+            "Enter a new name for the database \"{old}\".\n(.db is added automatically if you leave it out)"
+        ),
+        DbNamePurpose::CreateFolder => {
+            "Enter a name for the new folder (emoji are fine).\nA folder only groups your databases - nothing is created on disk.".to_string()
+        }
+        DbNamePurpose::RenameFolder(old) => format!(
+            "Enter a new name for the folder \"{old}\".\nIts databases stay in it."
+        ),
+    };
+    let hint = Paragraph::new(hint_text).style(Style::new().white());
     frame.render_widget(hint, layout[1]);
 
     // keep 2 for borders and 1 for cursor
@@ -1166,7 +1329,12 @@ fn render_new_database_name_view(model: &Model, frame: &mut Frame) {
         .block(
             Block::bordered()
                 .border_style(Style::default().fg(PRIMARY_COLOR))
-                .title(" database name (Enter/Ctrl+s: create, Esc: cancel) ")
+                .title(match model.db_name_purpose {
+                    DbNamePurpose::Create => " database name (Enter/Ctrl+s: create, Esc: cancel) ",
+                    DbNamePurpose::Rename(_) => " new name (Enter/Ctrl+s: rename, Esc: cancel) ",
+                    DbNamePurpose::CreateFolder => " folder name (Enter/Ctrl+s: create, Esc: cancel) ",
+                    DbNamePurpose::RenameFolder(_) => " new folder name (Enter/Ctrl+s: rename, Esc: cancel) ",
+                })
                 .title_style(Style::new().bold().bg(PRIMARY_COLOR).fg(FG_COLOR)),
         );
     frame.render_widget(p, layout[2]);
@@ -1347,6 +1515,193 @@ fn render_search_scope_picker_view(model: &mut Model, frame: &mut Frame) {
         .direction(ListDirection::TopToBottom);
 
     frame.render_stateful_widget(list, layout[1], &mut model.scope_picker_state);
+
+    render_status_line(model, frame, layout[2]);
+}
+
+/// Width of a text as drawn in the terminal (emoji and some scripts take
+/// two columns, so `chars().count()` would misalign columns).
+fn display_width(text: &str) -> usize {
+    Span::raw(text).width()
+}
+
+fn pad_to_width(text: &str, width: usize) -> String {
+    format!("{text}{}", " ".repeat(width.saturating_sub(display_width(text))))
+}
+
+fn database_count_label(count: usize) -> String {
+    if count == 1 {
+        "1 database".to_string()
+    } else {
+        format!("{count} databases")
+    }
+}
+
+fn folder_stats(model: &Model, row: &FolderRow) -> String {
+    let dbs = match row {
+        FolderRow::Folder(name) => model.dbs_in_folder(Some(name)),
+        FolderRow::Unfiled => model.dbs_in_folder(None),
+    };
+
+    let links = if model.db_counts_loaded {
+        let total: i64 = dbs
+            .iter()
+            .filter_map(|d| model.db_counts.get(d).copied().flatten())
+            .sum();
+        total.to_string()
+    } else {
+        "...".to_string()
+    };
+
+    format!("[ {}, {links} links ]", database_count_label(dbs.len()))
+}
+
+fn render_folder_list_view(model: &mut Model, frame: &mut Frame) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(10),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+
+    let rows = model.folder_rows();
+    let number_width = rows.len().to_string().len();
+    let labels: Vec<String> = rows
+        .iter()
+        .map(|r| match r {
+            FolderRow::Folder(name) => name.clone(),
+            FolderRow::Unfiled => UNFILED_LABEL.to_string(),
+        })
+        .collect();
+    let name_width = labels.iter().map(|l| display_width(l)).max().unwrap_or(0);
+
+    let items: Vec<ListItem> = rows
+        .iter()
+        .zip(labels.iter())
+        .enumerate()
+        .map(|(i, (row, label))| {
+            let text = format!(
+                "{number:>number_width$}. {label}    {stats}",
+                number = i + 1,
+                label = pad_to_width(label, name_width),
+                stats = folder_stats(model, row),
+            );
+            ListItem::new(Line::from(text))
+        })
+        .collect();
+
+    let title = match model.folder_list_purpose {
+        FolderListPurpose::Browse => {
+            " folders (click/Enter: open, C: new, R: rename, D: delete, Esc: back) "
+        }
+        FolderListPurpose::MoveDatabases => {
+            " move to folder (Enter: choose, C: new folder, Esc: cancel) "
+        }
+    };
+
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .title(title)
+        .padding(Padding::new(1, 1, 0, 0));
+    if !rows.is_empty() {
+        model.click_area = Some(block.inner(layout[1]));
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .style(Style::new().white())
+        .highlight_symbol("> ")
+        .repeat_highlight_symbol(true)
+        .highlight_style(Style::new().fg(COLOR_TWO).bold())
+        .direction(ListDirection::TopToBottom);
+
+    if rows.is_empty() {
+        let hint = Paragraph::new("No folders yet. Press C to create one, then open it and move databases in with Space + m.")
+            .style(Style::new().white())
+            .block(Block::new().borders(Borders::ALL).title(title));
+        frame.render_widget(hint, layout[1]);
+    } else {
+        frame.render_stateful_widget(&list, layout[1], &mut model.folder_list_state);
+    }
+
+    render_status_line(model, frame, layout[2]);
+}
+
+fn render_folder_contents_view(model: &mut Model, frame: &mut Frame) {
+    let layout = Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints(vec![
+            Constraint::Length(2),
+            Constraint::Min(10),
+            Constraint::Length(1),
+        ])
+        .split(frame.area());
+
+    render_header(model, frame, layout[0]);
+
+    let number_width = model.folder_dbs.len().to_string().len();
+    let name_width = model
+        .folder_dbs
+        .iter()
+        .map(|n| display_width(n))
+        .max()
+        .unwrap_or(0);
+
+    let items: Vec<ListItem> = model
+        .folder_dbs
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let count = match model.db_counts.get(name) {
+                Some(Some(n)) => format!("[ {n} ]"),
+                Some(None) => "[ ? ]".to_string(),
+                None if model.db_counts_loaded => "[ ? ]".to_string(),
+                None => "[ ... ]".to_string(),
+            };
+            let is_active = name == &model.active_db_name;
+            let mark = if model.marked_dbs.contains(name) { "[x] " } else { "    " };
+            let marker = if is_active { "* " } else { "  " };
+            let suffix = if is_active { " (active)" } else { "" };
+            let text = format!(
+                "{mark}{marker}{number:>number_width$}. {name}    {count}{suffix}",
+                number = i + 1,
+                name = pad_to_width(name, name_width),
+            );
+
+            if is_active {
+                ListItem::new(Line::styled(text, Style::new().fg(PRIMARY_COLOR).bold()))
+            } else {
+                ListItem::new(Line::from(text))
+            }
+        })
+        .collect();
+
+    let title = " databases (click/Enter: switch, Space: mark, m: move to folder, Esc: back) ";
+
+    if items.is_empty() {
+        let hint = Paragraph::new("No databases here. Open another folder (or \"(no folder)\"), mark databases with Space and press m to move them into this one.")
+            .style(Style::new().white())
+            .block(Block::new().borders(Borders::ALL).title(title));
+        frame.render_widget(hint, layout[1]);
+    } else {
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .title(title)
+            .padding(Padding::new(1, 1, 0, 0));
+        model.click_area = Some(block.inner(layout[1]));
+        let list = List::new(items)
+            .block(block)
+            .style(Style::new().white())
+            .highlight_symbol("> ")
+            .repeat_highlight_symbol(true)
+            .highlight_style(Style::new().fg(COLOR_TWO).bold())
+            .direction(ListDirection::TopToBottom);
+        frame.render_stateful_widget(&list, layout[1], &mut model.folder_dbs_state);
+    }
 
     render_status_line(model, frame, layout[2]);
 }

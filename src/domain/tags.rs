@@ -2,7 +2,12 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Serialize;
 
-pub const TAG_REGEX_STR: &str = r"^[a-zA-Z0-9_-]{1,30}(/[a-zA-Z0-9_-]{1,30}){0,3}$";
+// Letters, marks and digits of any language, emoji (with their joiners/variation
+// selectors), `_` and `-`; up to 4 levels separated by `/`.
+pub const TAG_REGEX_STR: &str = r"^[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\x{FE0F}\x{200D}_-]{1,30}(/[\p{L}\p{M}\p{N}\p{Extended_Pictographic}\x{FE0F}\x{200D}_-]{1,30}){0,3}$";
+
+/// The tag rules in plain words, for error messages.
+pub const TAG_RULES_STR: &str = "letters/digits of any language, emoji, _ and -; up to 30 characters; use / for sub-tags (up to 4 levels)";
 
 #[derive(PartialEq, Eq, Serialize, Debug, PartialOrd, Ord)]
 pub struct Tag(String);

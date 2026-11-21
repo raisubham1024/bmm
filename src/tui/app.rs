@@ -60,7 +60,63 @@ impl AppTuiError {
     }
 }
 
+/// Terminal features bmm switches on while it runs, and makes sure are
+/// switched off again however bmm exits:
+/// - mouse reporting (clicks/taps and the scroll wheel reach bmm);
+/// - the "keyboard enhancement" protocol, when the terminal supports it,
+///   which is the only way a terminal can report the Super (Windows) key,
+///   needed for Alt+Super+1..5 in the database list.
+struct TerminalExtras {
+    keyboard_enhancement: bool,
+}
+
+impl TerminalExtras {
+    fn enable() -> Self {
+        use ratatui::crossterm::event::{
+            EnableMouseCapture, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        };
+
+        // a terminal that can't do these just keeps working with the
+        // keyboard the way it always did
+        let _ = ratatui::crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+
+        let keyboard_enhancement =
+            ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
+                && ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+                )
+                .is_ok();
+
+        Self {
+            keyboard_enhancement,
+        }
+    }
+
+    fn disable(&mut self) {
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::DisableMouseCapture
+        );
+
+        if self.keyboard_enhancement {
+            self.keyboard_enhancement = false;
+            let _ = ratatui::crossterm::execute!(
+                std::io::stdout(),
+                ratatui::crossterm::event::PopKeyboardEnhancementFlags
+            );
+        }
+    }
+}
+
+impl Drop for TerminalExtras {
+    fn drop(&mut self) {
+        self.disable();
+    }
+}
+
 struct AppTui {
+    terminal_extras: TerminalExtras,
     pub(super) terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
     pub(super) event_tx: Sender<Message>,
     pub(super) event_rx: Receiver<Message>,
@@ -75,6 +131,7 @@ impl AppTui {
         db_name: String,
     ) -> Result<Self, AppTuiError> {
         let terminal = ratatui::try_init().map_err(AppTuiError::InitializeTerminal)?;
+        let terminal_extras = TerminalExtras::enable();
         let (event_tx, event_rx) = mpsc::channel(10);
         let mut initial_commands = Vec::new();
 
@@ -102,6 +159,7 @@ impl AppTui {
         let model = Model::default(pool, context, terminal_dimensions, db_name);
 
         Ok(Self {
+            terminal_extras,
             terminal,
             event_tx,
             event_rx,
@@ -144,13 +202,24 @@ impl AppTui {
                 Ok(ready) = tokio::task::spawn_blocking(|| ratatui::crossterm::event::poll(Duration::from_millis(EVENT_POLL_DURATION_MS))) => {
                     match ready {
                         Ok(true) => {
-                            let event = ratatui::crossterm::event::read().map_err(AppTuiError::ReadEvent)?;
+                            let event = normalize_event(
+                                ratatui::crossterm::event::read().map_err(AppTuiError::ReadEvent)?,
+                            );
                             self.model.event_counter += 1;
                             if let Some(handling_msg) = get_event_handling_msg(&self.model, event) {
                                 self.event_tx.try_send(handling_msg)?;
                             }
                         }
-                        Ok(false) => continue,
+                        Ok(false) => {
+                            // Terminals don't report the Alt key being
+                            // released, so once a pause follows the last
+                            // Alt+<digit> typed in the Database List, the
+                            // number typed so far is applied.
+                            if self.model.alt_number_expired() {
+                                let _ = self.event_tx.try_send(Message::AltDigitTimeout);
+                            }
+                            continue;
+                        }
                         Err(e) => {
                                 return Err(AppTuiError::PollForEvents(e));
                         }
@@ -161,6 +230,30 @@ impl AppTui {
     }
 
     fn exit(&mut self) -> Result<(), IOError> {
+        // mouse reporting / enhanced keys go off before leaving the
+        // alternate screen
+        self.terminal_extras.disable();
         ratatui::try_restore()
+    }
+}
+
+/// With the keyboard enhancement protocol on, a terminal reports
+/// Alt+Shift+b as the *unshifted* key `b` plus a Shift modifier, where
+/// without it the key arrives as `B`. bmm matches the capital letter (eg.
+/// Alt+B must not be taken for Alt+b), so make both forms look the same.
+fn normalize_event(event: ratatui::crossterm::event::Event) -> ratatui::crossterm::event::Event {
+    use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
+
+    match event {
+        Event::Key(mut key)
+            if key.modifiers.contains(KeyModifiers::SHIFT)
+                && matches!(key.code, KeyCode::Char(c) if c.is_ascii_lowercase()) =>
+        {
+            if let KeyCode::Char(c) = key.code {
+                key.code = KeyCode::Char(c.to_ascii_uppercase());
+            }
+            Event::Key(key)
+        }
+        other => other,
     }
 }

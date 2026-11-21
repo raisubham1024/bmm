@@ -1,0 +1,62 @@
+{"run_id":"1795178129-939703640","line":284,"new":{"module_name":"save_test","snapshot_name":"saving_a_new_bookmark_with_an_invalid_tag_fails","metadata":{"source":"tests/save_test.rs","assertion_line":284,"info":{"program":"bmm","args":["save","https://github.com/dhth/bmm","--tags","tag1,invalid tag, another    invalid\t\ttag ","--db-path","/tmp/.tmpS0n9Ai/bmm.db"]}},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[\\p{L}\\p{M}\\p{N}\\p{Extended_Pictographic}\\x{FE0F}\\x{200D}_-]{1,30}(/[\\p{L}\\p{M}\\p{N}\\p{Extended_Pictographic}\\x{FE0F}\\x{200D}_-]{1,30}){0,3}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."},"old":{"module_name":"save_test","metadata":{},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[a-zA-Z0-9_-]{1,30}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."}}
+{"run_id":"1795178129-939703640","line":329,"new":null,"old":null}
+{"run_id":"1795178129-939703640","line":307,"new":null,"old":null}
+{"run_id":"1795178129-939703640","line":54,"new":null,"old":null}
+{"run_id":"1795178129-939703640","line":63,"new":null,"old":null}
+{"run_id":"1795178129-939703640","line":20,"new":null,"old":null}
+{"run_id":"1795178129-939703640","line":29,"new":null,"old":null}
+{"run_id":"1795178157-511042156","line":284,"new":{"module_name":"save_test","snapshot_name":"saving_a_new_bookmark_with_an_invalid_tag_fails","metadata":{"source":"tests/save_test.rs","assertion_line":284,"info":{"program":"bmm","args":["save","https://github.com/dhth/bmm","--tags","tag1,invalid tag, another    invalid\t\ttag ","--db-path","/tmp/.tmpp2IR5E/bmm.db"]}},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[a-zA-Z0-9_-]{1,30}(/[a-zA-Z0-9_-]{1,30}){0,3}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."},"old":{"module_name":"save_test","metadata":{},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[a-zA-Z0-9_-]{1,30}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."}}
+{"run_id":"1795178179-434214706","line":86,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":98,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":107,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":183,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":192,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":221,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":230,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":130,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":148,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":157,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":258,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":284,"new":{"module_name":"save_test","snapshot_name":"saving_a_new_bookmark_with_an_invalid_tag_fails","metadata":{"source":"../../../tmp/orig/bmm-main/tests/save_test.rs","assertion_line":284,"info":{"program":"bmm","args":["save","https://github.com/dhth/bmm","--tags","tag1,invalid tag, another    invalid\t\ttag ","--db-path","/tmp/.tmpTbXooj/bmm.db"]}},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[a-zA-Z0-9_-]{1,30}(/[a-zA-Z0-9_-]{1,30}){0,3}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."},"old":{"module_name":"save_test","metadata":{},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[a-zA-Z0-9_-]{1,30}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."}}
+{"run_id":"1795178179-434214706","line":329,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":307,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":54,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":63,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":20,"new":null,"old":null}
+{"run_id":"1795178179-434214706","line":29,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":86,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":98,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":107,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":183,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":192,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":221,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":230,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":130,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":148,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":157,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":258,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":284,"new":{"module_name":"save_test","snapshot_name":"saving_a_new_bookmark_with_an_invalid_tag_fails","metadata":{"source":"tests/save_test.rs","assertion_line":284,"info":{"program":"bmm","args":["save","https://github.com/dhth/bmm","--tags","tag1,invalid tag, another    invalid\t\ttag ","--db-path","/tmp/.tmpI4ELfe/bmm.db"]}},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (allowed: letters/digits of any language, emoji, _ and -; up to 30 characters; use / for sub-tags (up to 4 levels))\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."},"old":{"module_name":"save_test","metadata":{},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[a-zA-Z0-9_-]{1,30}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."}}
+{"run_id":"1795178806-642667102","line":329,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":307,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":54,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":63,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":20,"new":null,"old":null}
+{"run_id":"1795178806-642667102","line":29,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":86,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":98,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":107,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":183,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":192,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":221,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":230,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":130,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":148,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":157,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":258,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":284,"new":{"module_name":"save_test","snapshot_name":"saving_a_new_bookmark_with_an_invalid_tag_fails","metadata":{"source":"tests/save_test.rs","assertion_line":284,"info":{"program":"bmm","args":["save","https://github.com/dhth/bmm","--tags","tag1,invalid tag, another    invalid\t\ttag ","--db-path","/tmp/.tmpAuv8gi/bmm.db"]}},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (allowed: letters/digits of any language, emoji, _ and -; up to 30 characters; use / for sub-tags (up to 4 levels))\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."},"old":{"module_name":"save_test","metadata":{},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[a-zA-Z0-9_-]{1,30}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."}}
+{"run_id":"1795231647-325054940","line":329,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":307,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":54,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":63,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":20,"new":null,"old":null}
+{"run_id":"1795231647-325054940","line":29,"new":null,"old":null}

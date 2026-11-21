@@ -1,4 +1,4 @@
-mod check;
+pub(crate) mod check;
 mod delete;
 mod display;
 mod fetch;

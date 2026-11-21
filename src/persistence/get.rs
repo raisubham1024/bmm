@@ -735,6 +735,15 @@ ORDER BY name
     Ok(tag_names)
 }
 
+/// Returns the total number of bookmarks saved in this database. Used by
+/// the Database List view to show "[ <count> ]" next to every database.
+pub async fn count_bookmarks(pool: &Pool<Sqlite>) -> Result<i64, DBError> {
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM bookmarks")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| DBError::CouldntExecuteQuery("count bookmarks".into(), e))
+}
+
 pub async fn get_all_bookmarks(pool: &Pool<Sqlite>) -> Result<Vec<SavedBookmark>, DBError> {
     get_bookmarks(pool, None, None, vec![], 1000).await
 }
