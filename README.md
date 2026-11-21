@@ -93,8 +93,27 @@ cargo build --release
    pkg install termux-api
    ```
 
-4. Download the Android **aarch64** binary from [bmm Releases](https://github.com/raisubham1024/bmm/releases), or build from source using the Termux Rust package.
-5. Put the executable somewhere on your `PATH`, make it executable, and run `bmm`.
+4. Download the Android **aarch64** binary from [bmm Releases](https://github.com/raisubham1024/bmm/releases). In Termux, go to the directory where you downloaded it and rename the downloaded file to `bmm`. For example, if the file is named `bmm-android-aarch64`, run:
+
+   ```bash
+   mv bmm-android-aarch64 bmm
+   ```
+
+5. Make the binary executable, then move it into Termux's command directory:
+
+   ```bash
+   chmod +x bmm
+   mv bmm $PREFIX/bin/
+   ```
+
+   `$PREFIX/bin` is Termux's executable directory (usually `/data/data/com.termux/files/usr/bin`). After moving `bmm` there, you can run it from any directory in Termux.
+
+6. Check that it is installed, then launch it:
+
+   ```bash
+   bmm --version
+   bmm
+   ```
 
 Termux:API is needed for clipboard and browser actions. Without it, those actions cannot work. See [TERMUX.md](TERMUX.md) for additional Termux build and troubleshooting notes.
 
