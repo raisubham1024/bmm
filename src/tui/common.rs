@@ -51,8 +51,9 @@ pub(crate) enum DbListPurpose {
 }
 
 /// How the Database List view orders its databases (Alt+Super+1 ..
-/// Alt+Super+5, or `v` to go through them one by one). `Custom` is the
-/// order the user arranged with `a` and is the default.
+/// Alt+Super+5, or `v` to go through them one by one). `NameAsc` (view 2,
+/// names A-Z) is the default; `Custom` is the order the user arranged
+/// with `a`.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) enum DbView {
     /// 1: the order the user arranged by hand

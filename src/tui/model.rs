@@ -734,7 +734,7 @@ impl Model {
             folder_dbs_state: ListState::default().with_selected(Some(0)),
             marked_dbs: HashSet::new(),
             folder_move_names: vec![],
-            db_view: DbView::Custom,
+            db_view: DbView::NameAsc,
             custom_dbs: vec![],
             nav_history: vec![],
             skip_nav_push: false,
@@ -2348,8 +2348,8 @@ impl Model {
     }
 
     fn show_database_list_for(&mut self, purpose: DbListPurpose) {
-        // the list always opens in the user's own order (Alt+1)
-        self.db_view = DbView::Custom;
+        // the list always opens in view 2 (names A-Z, same as Alt+Super+2)
+        self.db_view = DbView::NameAsc;
         self.scan_available_databases();
         self.db_search_input.reset();
         self.db_list_purpose = purpose;
@@ -2381,7 +2381,13 @@ impl Model {
         } else {
             self.available_dbs
                 .iter()
-                .filter(|d| d.to_lowercase().contains(&query))
+                .filter(|d| {
+                    let name_lower = d.to_lowercase();
+                    // anywhere in the name, or the letters in order from
+                    // the first one (eg. "ledata" -> "learn_database"),
+                    // same as searching tags
+                    name_lower.contains(&query) || tag_match_rank(&name_lower, &query).is_some()
+                })
                 .cloned()
                 .collect()
         };
@@ -3476,6 +3482,13 @@ mod tag_match_tests {
         assert_eq!(tag_match_rank("learn_networking", "lnaer"), None);
         assert_eq!(tag_match_rank("learn_networking", "leaz"), None);
         assert_eq!(tag_match_rank("learn_networking", "x"), None);
+    }
+
+    #[test]
+    fn database_names_match_the_same_way() {
+        // "le" + "data" typed together finds learn_database.db
+        assert_eq!(tag_match_rank("learn_database.db", "ledata"), Some(1));
+        assert_eq!(tag_match_rank("learn_database.db", "data"), None);
     }
 
     #[test]

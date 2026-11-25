@@ -437,7 +437,7 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!(
                 "Alt+Super+1..5",
-                "Order of the list: 1 your own order\n(see `a`), 2 names A-Z, 3 names Z-A,\n4 fewest links first, 5 most links first.\nNeeds a terminal that reports the Super\nkey (kitty, WezTerm, foot, Ghostty...)."
+                "Order of the list: 1 your own order\n(see `a`), 2 names A-Z (default), 3 names Z-A,\n4 fewest links first, 5 most links first.\nNeeds a terminal that reports the Super\nkey (kitty, WezTerm, foot, Ghostty...)."
             ),
             row!(
                 "v",
@@ -453,7 +453,7 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
             ),
             row!(
                 "/",
-                "Open the database search box, to\nfilter the list by name."
+                "Open the database search box, to\nfilter the list by name. Like tag search,\nletters typed in order also match, eg.\n\"ledata\" finds learn_database."
             ),
             row!(
                 "C",
