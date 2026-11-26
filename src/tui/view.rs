@@ -197,6 +197,22 @@ fn render_header(model: &Model, frame: &mut Frame, chunk: Rect) {
                 ));
             }
 
+            if let Some(related) = &model.related_tags {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    format!(" connected to \"{}\" ", related.origin),
+                    Style::new().bold().bg(COLOR_TWO).fg(FG_COLOR),
+                ));
+            }
+
+            if model.showing_starred_tags {
+                header_components.push(Span::from(" "));
+                header_components.push(Span::styled(
+                    " starred ",
+                    Style::new().bold().bg(COLOR_THREE).fg(FG_COLOR),
+                ));
+            }
+
             if model.global_tags_mode {
                 header_components.push(Span::from(" "));
                 header_components.push(Span::styled(
@@ -484,7 +500,29 @@ fn render_bookmarks_list(model: &mut Model, frame: &mut Frame, chunk: Rect) {
 }
 
 fn render_tag_list(model: &mut Model, frame: &mut Frame, chunk: Rect) {
-    let items: Vec<ListItem> = model.tag_items.items.iter().map(ListItem::from).collect();
+    let items: Vec<ListItem> = model
+        .tag_items
+        .items
+        .iter()
+        .map(|t| {
+            let star = if model.starred_tags.contains(&t.name) {
+                "\u{2605} "
+            } else {
+                ""
+            };
+
+            // in the "related tags" list, how far each tag is from the one
+            // that was asked about
+            let distance = match model.related_tags.as_ref().and_then(|r| r.hops.get(&t.name)) {
+                Some(0) => "  (this tag)".to_string(),
+                Some(1) => "  (together with it)".to_string(),
+                Some(n) => format!("  ({n} steps away)"),
+                None => String::new(),
+            };
+
+            ListItem::new(Line::from(format!("{star}{}{distance}", t.name)))
+        })
+        .collect();
 
     let list = List::new(items)
         .block(Block::new().padding(Padding::new(0, 0, 1, 1)))

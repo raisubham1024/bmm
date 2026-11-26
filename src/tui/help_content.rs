@@ -229,6 +229,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
                 "Open the Tags List View for the active\ndatabase only (only while you are not\nalready searching)."
             ),
             row!(
+                "Ctrl+T",
+                "Only while the list shows the bookmarks\nof a tag (Tags List -> Enter on a tag):\nlist every tag connected to that tag,\nfrom all databases - tags used together\nwith it, then tags used together with\nthose, and so on (nearest first). Enter\non one of them shows its bookmarks, and\nCtrl+T there goes one step further."
+            ),
+            row!(
                 "T",
                 "Open the Tags List View for every\ndatabase at once - tag counts are\nsummed across databases, and picking a\ntag shows matching bookmarks from every\ndatabase (each result shows which\ndatabase it's from)."
             ),
@@ -342,6 +346,14 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
         title: "Tags List View",
         rows: &[
             row!("/", "Open the tag search box, to filter the\ntag list."),
+            row!(
+                "*",
+                "Star / unstar the tag under your cursor\n(starred tags show a star in front). Via\n\"T\" it's starred in every database."
+            ),
+            row!(
+                "S",
+                "Show only your starred tags. Press again\nto show all tags. Works in the \"t\" and\n\"T\" Tags List views."
+            ),
             row!(
                 "Enter",
                 "Show every bookmark that has the tag\nunder your cursor."

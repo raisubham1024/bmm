@@ -125,6 +125,19 @@ AND NOT EXISTS (
                     DBError::CouldntExecuteQuery("replace tag id in bookmark_tags".to_string(), e)
                 })?;
 
+                // the tag being merged away may be starred - keep that
+                sqlx::query(
+                    "UPDATE tags SET starred = 1 WHERE id = ? \
+                     AND (SELECT starred FROM tags WHERE id = ?) = 1",
+                )
+                .bind(new_tag_id)
+                .bind(original_tag_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| {
+                    DBError::CouldntExecuteQuery("carry over tag star".to_string(), e)
+                })?;
+
                 sqlx::query!(
                     "
 DELETE FROM

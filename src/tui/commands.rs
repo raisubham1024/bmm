@@ -31,6 +31,16 @@ pub(super) enum Command {
     /// add/edit bookmark screen can suggest tags that exist in any
     /// database, not only the active one.
     FetchSuggestionTags,
+    /// Stars/unstars a tag - in every local database when
+    /// `all_databases` is set (Tags List opened with `T`), otherwise only
+    /// in the active one.
+    /// Finds every tag connected to this one, across all local databases.
+    FetchRelatedTags(String),
+    SetTagStarred {
+        name: String,
+        starred: bool,
+        all_databases: bool,
+    },
     /// Fetches every bookmark tagged with the given tag across every local
     /// database - the "all databases" counterpart to `FetchBookmarksForTag`,
     /// used when a tag is selected from the `T` (global) Tags List view.

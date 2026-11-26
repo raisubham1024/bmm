@@ -163,6 +163,19 @@ pub enum Message {
     ToggleAllTagSuggestions,
     /// Alt+t in the tags field: include tags from every database.
     ToggleOtherDbTagSuggestions,
+    /// `*` in the Tags List view.
+    RequestToggleTagStar,
+    /// Ctrl+T in a tag's bookmark list.
+    ShowRelatedTags,
+    /// (the tag asked about, the tags connected to it, databases that
+    /// couldn't be read)
+    RelatedTagsFetched(String, Vec<crate::persistence::RelatedTag>, Vec<String>),
+    /// (tag name, new starred state, outcome)
+    TagStarSet(String, bool, Result<(), String>),
+    /// `S` in the Tags List view.
+    ToggleStarredTagsFilter,
+    /// Names of the starred tags (in every database, for the `T` view).
+    StarredTagsFetched(std::collections::HashSet<String>),
     TagSuggestionNext,
     TagSuggestionPrev,
     AcceptTagSuggestion,
@@ -378,6 +391,11 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         // as pressing Enter on a blank query in search mode.
                         KeyCode::Char('l') => Some(Message::ShowAllBookmarks),
                         KeyCode::Char('a') => Some(Message::StartAddBookmark),
+                        // Ctrl+T in a tag's bookmark list: every tag connected
+                        // to that tag, from all databases
+                        KeyCode::Char('t') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                            Some(Message::ShowRelatedTags)
+                        }
                         KeyCode::Char('t') | KeyCode::Tab => {
                             Some(Message::ShowView(ActivePane::TagsList))
                         }
@@ -442,6 +460,10 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                         KeyCode::Char('g') => Some(Message::GoToFirstListItem),
                         KeyCode::Char('G') => Some(Message::GoToLastListItem),
                         KeyCode::Char('/') => Some(Message::ShowView(ActivePane::TagSearchInput)),
+                        // star / unstar the tag under the cursor
+                        KeyCode::Char('*') => Some(Message::RequestToggleTagStar),
+                        // show only starred tags (again: all tags)
+                        KeyCode::Char('S') => Some(Message::ToggleStarredTagsFilter),
                         KeyCode::Char('e')
                             if key_event.modifiers.contains(KeyModifiers::ALT) =>
                         {

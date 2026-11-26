@@ -6,8 +6,8 @@ use crate::persistence::{
     DBError, SaveBookmarkOptions, count_bookmarks, create_or_update_bookmark,
     delete_bookmarks_with_uris, get_all_bookmarks, get_bookmark_with_exact_uri, get_bookmarks,
     get_bookmarks_by_query, get_bookmarks_with_notes, get_db_pool, get_note, get_starred_bookmarks,
-    get_starred_uris, get_tags, get_tags_with_stats, rename_bookmark_uri, rename_tag_name, set_note,
-    set_starred, toggle_starred,
+    find_related_tags, get_bookmark_tag_sets, get_starred_tag_names, get_starred_uris, get_tags, get_tags_with_stats, rename_bookmark_uri, rename_tag_name, set_note,
+    set_starred, set_tag_starred, toggle_starred,
 };
 use sqlx::{Pool, Sqlite};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -77,6 +77,11 @@ pub(super) async fn handle_command(
         Command::FetchTags => {
             let pool = pool.clone();
             tokio::spawn(async move {
+                // starred names go first, so they're already known when
+                // the tag list arrives
+                if let Ok(starred) = get_starred_tag_names(&pool).await {
+                    let _ = event_tx.try_send(Message::StarredTagsFetched(starred));
+                }
                 let result = get_tags_with_stats(&pool).await;
                 let message = Message::TagsFetched(result);
                 let _ = event_tx.try_send(message);
@@ -95,17 +100,26 @@ pub(super) async fn handle_command(
                 let mut totals: std::collections::BTreeMap<String, i64> =
                     std::collections::BTreeMap::new();
                 let mut errors: Vec<String> = Vec::new();
+                // a tag counts as starred when it's starred in any database
+                let mut starred: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
 
                 for (name, path) in local_db_files() {
                     match get_db_pool(&path).await {
-                        Ok(db_pool) => match get_tags_with_stats(&db_pool).await {
-                            Ok(stats) => {
-                                for stat in stats {
-                                    *totals.entry(stat.name).or_insert(0) += stat.num_bookmarks;
-                                }
+                        Ok(db_pool) => {
+                            if let Ok(names) = get_starred_tag_names(&db_pool).await {
+                                starred.extend(names);
                             }
-                            Err(e) => errors.push(format!("{name}: {e}")),
-                        },
+                            match get_tags_with_stats(&db_pool).await {
+                                Ok(stats) => {
+                                    for stat in stats {
+                                        *totals.entry(stat.name).or_insert(0) +=
+                                            stat.num_bookmarks;
+                                    }
+                                }
+                                Err(e) => errors.push(format!("{name}: {e}")),
+                            }
+                        }
                         Err(e) => errors.push(format!("{name}: {e}")),
                     }
                 }
@@ -118,7 +132,77 @@ pub(super) async fn handle_command(
                     })
                     .collect();
 
+                // starred names first, so they're known when the list arrives
+                let _ = event_tx.try_send(Message::StarredTagsFetched(starred));
                 let _ = event_tx.try_send(Message::GlobalTagsFetched(tags, errors));
+            });
+        }
+        Command::FetchRelatedTags(tag) => {
+            tokio::spawn(async move {
+                let mut all_sets: Vec<Vec<String>> = Vec::new();
+                let mut errors: Vec<String> = Vec::new();
+                let mut starred: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+
+                // every database is read, so the connections found are
+                // the ones across all of them (tags match by name)
+                for (name, path) in local_db_files() {
+                    match get_db_pool(&path).await {
+                        Ok(db_pool) => {
+                            if let Ok(names) = get_starred_tag_names(&db_pool).await {
+                                starred.extend(names);
+                            }
+                            match get_bookmark_tag_sets(&db_pool).await {
+                                Ok(sets) => all_sets.extend(sets),
+                                Err(e) => errors.push(format!("{name}: {e}")),
+                            }
+                        }
+                        Err(e) => errors.push(format!("{name}: {e}")),
+                    }
+                }
+
+                let related = find_related_tags(&tag, &all_sets);
+
+                let _ = event_tx.try_send(Message::StarredTagsFetched(starred));
+                let _ = event_tx.try_send(Message::RelatedTagsFetched(tag, related, errors));
+            });
+        }
+        Command::SetTagStarred {
+            name,
+            starred,
+            all_databases,
+        } => {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let result: Result<(), String> = if all_databases {
+                    let mut worked = false;
+                    let mut errors: Vec<String> = Vec::new();
+
+                    for (db_name, path) in local_db_files() {
+                        match get_db_pool(&path).await {
+                            Ok(db_pool) => match set_tag_starred(&db_pool, &name, starred).await {
+                                Ok(_) => worked = true,
+                                Err(e) => errors.push(format!("{db_name}: {e}")),
+                            },
+                            Err(e) => errors.push(format!("{db_name}: {e}")),
+                        }
+                    }
+
+                    // fine as long as it worked somewhere - a database that
+                    // couldn't be opened shouldn't block starring the tag
+                    if worked || errors.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(errors.join("; "))
+                    }
+                } else {
+                    set_tag_starred(&pool, &name, starred)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("{e}"))
+                };
+
+                let _ = event_tx.try_send(Message::TagStarSet(name, starred, result));
             });
         }
         Command::FetchSuggestionTags => {

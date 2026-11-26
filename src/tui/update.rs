@@ -19,6 +19,7 @@ fn is_forward_navigation(msg: &Message) -> bool {
             | Message::ShowFolders
             | Message::ShowGlobalTagsList
             | Message::ShowBookmarksForTag
+            | Message::ShowRelatedTags
             | Message::ShowView(ActivePane::TagsList)
             | Message::ShowView(ActivePane::Help)
             | Message::ShowView(ActivePane::SearchInput)
@@ -318,8 +319,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 // tag-name suggestions current - so it must never itself
                 // change which pane is showing, or it'd yank the user
                 // out of whatever they were doing the moment it finishes.
-                model.all_tag_items = t.clone();
-                model.tag_items = TagItems::from(t);
+                model.set_all_tag_items(t);
             }
             Err(e) => model.user_message = Some(UserMessage::error(&format!("{e}"))),
         },
@@ -398,6 +398,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             if let Some(current_tag_index) = model.tag_items.state.selected()
                 && let Some(selected_tag) = model.tag_items.items.get(current_tag_index)
             {
+                model.pending_bookmark_tag = Some(selected_tag.name.clone());
                 if model.global_tags_mode {
                     cmds.push(Command::FetchBookmarksForTagAcrossDatabases(
                         selected_tag.name.to_string(),
@@ -412,6 +413,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 model.showing_starred = false;
                 model.initial = false;
                 model.bookmark_items = BookmarkItems::from(bookmarks);
+                model.bookmark_items.tag = model.pending_bookmark_tag.take();
                 model.sync_starred_markers();
                 model.active_pane = ActivePane::List;
             }
@@ -419,6 +421,9 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         },
         Message::ShowGlobalTagsList => {
             model.global_tags_mode = true;
+            model.showing_starred_tags = false;
+            model.related_tags = None;
+            model.tag_search_input.reset();
             model.active_pane = ActivePane::TagsList;
             cmds.push(Command::FetchGlobalTags);
         }
@@ -426,8 +431,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             // Same "don't yank the user out of whatever they're doing"
             // reasoning as the plain `TagsFetched` arm above - this just
             // refreshes the data.
-            model.all_tag_items = tags.clone();
-            model.tag_items = TagItems::from(tags);
+            model.set_all_tag_items(tags);
 
             if !errors.is_empty() {
                 model.user_message = Some(UserMessage::error(&format!(
@@ -453,6 +457,7 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                     })
                     .collect();
                 model.bookmark_items = BookmarkItems::from(items);
+                model.bookmark_items.tag = model.pending_bookmark_tag.take();
 
                 if !errors.is_empty() {
                     model.user_message = Some(UserMessage::error(&format!(
@@ -497,7 +502,16 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 // Refresh the tag list (and, if it's currently showing
                 // bookmarks for a tag, that too) so names/counts reflect
                 // the rename immediately, rather than only on next visit.
-                if model.global_tags_mode {
+                if let Some(related) = &model.related_tags {
+                    // still showing the tags connected to one tag: refresh
+                    // that list (the tag itself may be the one renamed)
+                    let origin = if related.origin == old_name {
+                        new_name.clone()
+                    } else {
+                        related.origin.clone()
+                    };
+                    cmds.push(Command::FetchRelatedTags(origin));
+                } else if model.global_tags_mode {
                     cmds.push(Command::FetchGlobalTags);
                 } else {
                     cmds.push(Command::FetchTags);
@@ -537,6 +551,56 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
                 cmds.push(c);
             }
         }
+        Message::ShowRelatedTags => {
+            if let Some(c) = model.request_related_tags() {
+                cmds.push(c);
+            }
+        }
+        Message::RelatedTagsFetched(origin, related, errors) => {
+            if related.is_empty() {
+                model.user_message = Some(UserMessage::info(&format!(
+                    "no tags found for \"{origin}\""
+                )));
+            } else {
+                model.show_related_tags(origin, related);
+            }
+
+            if !errors.is_empty() {
+                model.user_message = Some(UserMessage::error(&format!(
+                    "some databases couldn't be read: {}",
+                    errors.join("; ")
+                )));
+            }
+        }
+        Message::RequestToggleTagStar => {
+            if let Some(c) = model.request_toggle_tag_star() {
+                cmds.push(c);
+            }
+        }
+        Message::TagStarSet(name, starred, result) => match result {
+            Ok(()) => {
+                model.apply_tag_star(&name, starred);
+                let msg = if starred {
+                    format!("starred tag \"{name}\"!")
+                } else {
+                    format!("unstarred tag \"{name}\"!")
+                };
+                model.user_message = Some(UserMessage::info(&msg).with_frames_left(1));
+            }
+            Err(e) => {
+                model.user_message =
+                    Some(UserMessage::error(&format!("couldn't star tag: {e}")));
+            }
+        },
+        Message::ToggleStarredTagsFilter => {
+            model.toggle_starred_tags_filter();
+            if model.showing_starred_tags && model.tag_items.items.is_empty() {
+                model.user_message = Some(UserMessage::info(
+                    "no starred tags - press * on a tag to star it (S: back to all tags)",
+                ));
+            }
+        }
+        Message::StarredTagsFetched(names) => model.starred_tags = names,
         Message::StarToggled(uri, result) => match result {
             Ok(new_state) => {
                 model.apply_star_toggle(&uri, new_state);

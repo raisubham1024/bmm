@@ -45,3 +45,16 @@
 {"run_id":"1795231644-773896932","line":69,"new":null,"old":null}
 {"run_id":"1795231644-773896932","line":22,"new":null,"old":null}
 {"run_id":"1795231644-773896932","line":32,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":202,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":212,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":92,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":104,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":114,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":241,"new":{"module_name":"save_all_test","snapshot_name":"saving_multiple_bookmarks_fails_for_incorrect_uris","metadata":{"source":"tests/save_all_test.rs","assertion_line":241,"info":{"program":"bmm","args":["save-all","this is not a uri","https://github.com/dhth/omm","https:/ this!!isn't-either.com","--db-path","/tmp/.tmp6QcIzz/bmm.db"]}},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmarks: there was 1 validation error\n\n- entry 1: couldn't parse provided uri value: invalid international domain name\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."},"old":{"module_name":"save_all_test","metadata":{},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmarks: there were 2 validation errors\n\n- entry 1: couldn't parse provided uri value: relative URL without a base\n- entry 3: couldn't parse provided uri value: invalid international domain name\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."}}
+{"run_id":"1795722683-642905489","line":141,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":161,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":171,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":59,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":69,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":22,"new":null,"old":null}
+{"run_id":"1795722683-642905489","line":32,"new":null,"old":null}

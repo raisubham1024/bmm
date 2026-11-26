@@ -60,3 +60,21 @@
 {"run_id":"1795231647-325054940","line":63,"new":null,"old":null}
 {"run_id":"1795231647-325054940","line":20,"new":null,"old":null}
 {"run_id":"1795231647-325054940","line":29,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":86,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":98,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":107,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":183,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":192,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":221,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":230,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":130,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":148,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":157,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":258,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":284,"new":{"module_name":"save_test","snapshot_name":"saving_a_new_bookmark_with_an_invalid_tag_fails","metadata":{"source":"tests/save_test.rs","assertion_line":284,"info":{"program":"bmm","args":["save","https://github.com/dhth/bmm","--tags","tag1,invalid tag, another    invalid\t\ttag ","--db-path","/tmp/.tmpUdT7cm/bmm.db"]}},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (allowed: letters/digits of any language, emoji, _ and -; up to 30 characters; use / for sub-tags (up to 4 levels))\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."},"old":{"module_name":"save_test","metadata":{},"snapshot":"success: false\nexit_code: 1\n----- stdout -----\n\n----- stderr -----\nError: couldn't save bookmark: tags [\"invalid tag\", \" another    invalid\\t\\ttag \"] are invalid (valid regex: ^[a-zA-Z0-9_-]{1,30}$)\n\nPossible workaround: running with -i/--ignore-attribute-errors might fix some attribute errors.\nIf a title is too long, it'll will be trimmed, and some invalid tags might be transformed to fit bmm's requirements."}}
+{"run_id":"1795722684-811174126","line":329,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":307,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":54,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":63,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":20,"new":null,"old":null}
+{"run_id":"1795722684-811174126","line":29,"new":null,"old":null}

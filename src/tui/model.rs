@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     domain::{SavedBookmark, TagStats},
-    persistence::{SearchScope, SearchTerms},
+    persistence::{RelatedTag, SearchScope, SearchTerms},
 };
 use ratatui::{
     style::Style,
@@ -177,6 +177,18 @@ pub(crate) struct BookmarkItem {
 pub(crate) struct BookmarkItems {
     pub(crate) items: Vec<BookmarkItem>,
     pub(crate) state: ListState,
+    /// Set when this list is "the bookmarks of tag X" (opened with Enter
+    /// in the Tags List view) - what Ctrl+T finds related tags for.
+    pub(super) tag: Option<String>,
+}
+
+/// The Tags List view is showing the tags connected to `origin` (Ctrl+T in
+/// a tag's bookmark list) rather than every tag.
+#[derive(Debug, Clone)]
+pub(crate) struct RelatedTagsInfo {
+    pub(super) origin: String,
+    /// tag name -> how many steps away from `origin` (see `RelatedTag`)
+    pub(super) hops: std::collections::HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -211,6 +223,8 @@ pub(crate) struct ViewSnapshot {
     search_scope: SearchScope,
     search_input: Input,
     global_tags_mode: bool,
+    showing_starred_tags: bool,
+    related_tags: Option<RelatedTagsInfo>,
 }
 
 impl ViewSnapshot {
@@ -287,6 +301,7 @@ impl BookmarkItems {
         Self {
             items: vec![],
             state,
+            tag: None,
         }
     }
 }
@@ -310,7 +325,11 @@ impl From<Vec<SavedBookmark>> for BookmarkItems {
             .collect();
         let state = ListState::default().with_selected(Some(0));
 
-        Self { items, state }
+        Self {
+            items,
+            state,
+            tag: None,
+        }
     }
 }
 
@@ -318,7 +337,11 @@ impl From<Vec<BookmarkItem>> for BookmarkItems {
     fn from(items: Vec<BookmarkItem>) -> Self {
         let state = ListState::default().with_selected(Some(0));
 
-        Self { items, state }
+        Self {
+            items,
+            state,
+            tag: None,
+        }
     }
 }
 
@@ -332,7 +355,11 @@ impl From<(Vec<SavedBookmark>, usize)> for BookmarkItems {
             .collect();
         let state = ListState::default().with_selected(Some(index));
 
-        Self { items, state }
+        Self {
+            items,
+            state,
+            tag: None,
+        }
     }
 }
 
@@ -492,6 +519,15 @@ pub(super) struct Model {
     /// database's tags (`t`). Controls what `FetchTags`/`FetchGlobalTags`
     /// command gets fired on refresh, and what selecting a tag does.
     pub(super) global_tags_mode: bool,
+    /// Names of the starred tags (in the `T` view: starred in any database).
+    pub(super) starred_tags: HashSet<String>,
+    /// `S` in the Tags List view: only starred tags are listed.
+    pub(super) showing_starred_tags: bool,
+    /// Set while the Tags List shows the tags connected to one tag.
+    pub(super) related_tags: Option<RelatedTagsInfo>,
+    /// The tag picked with Enter in the Tags List, until its bookmarks
+    /// arrive and the bookmark list records it.
+    pub(super) pending_bookmark_tag: Option<String>,
     /// Name of the tag currently being renamed (Alt+e from the Tags List
     /// view), while `active_pane == ActivePane::RenameTag`.
     pub(super) rename_tag_original: String,
@@ -613,19 +649,39 @@ pub(super) struct Model {
 /// `["foo", "bar"]`) and the in-progress fragment after it (trimmed -
 /// `"ba"`). A value with no comma at all is treated as a single
 /// in-progress fragment (no completed tags yet).
-/// How well a typed fragment matches a tag name, for autocomplete: `Some(0)`
-/// when the name starts with it, `Some(1)` when the fragment's letters
-/// appear in the name in the same order *starting from its first letter*
-/// (so "leanet" and "lework" both find "learn_networking", and "lea" +
-/// anything further along in the name works too), `None` otherwise.
+/// How well a typed fragment matches a name, for autocomplete and search -
+/// lower is better, `None` is no match:
+///
+/// - `Some(0)`: the name starts with it ("dp" -> "dp_notes")
+/// - `Some(1)`: it starts a word inside the name, after `_`, `-`, a space
+///   or similar ("dp" -> "edit_dp", "net" -> "learn_networking")
+/// - `Some(2)`: it appears somewhere else inside the name ("dp" -> "xdpx")
+/// - `Some(3)`: its letters appear in the name in the same order *starting
+///   from the name's first letter* (so "leanet" and "lework" both find
+///   "learn_networking", and "dp" finds "dopamine")
+///
 /// Both arguments must already be lowercase.
 pub(super) fn tag_match_rank(name_lower: &str, fragment_lower: &str) -> Option<u8> {
     if name_lower.starts_with(fragment_lower) {
         return Some(0);
     }
 
+    let starts_a_word = name_lower.match_indices(fragment_lower).any(|(i, _)| {
+        name_lower[..i]
+            .chars()
+            .next_back()
+            .is_some_and(|before| !before.is_alphanumeric())
+    });
+    if starts_a_word {
+        return Some(1);
+    }
+
+    if name_lower.contains(fragment_lower) {
+        return Some(2);
+    }
+
     let mut name_chars = name_lower.chars();
-    let mut fragment_chars = fragment_lower.chars().peekable();
+    let fragment_chars = fragment_lower.chars();
 
     // the first letter must match the name's first letter
     if name_lower.chars().next() != fragment_lower.chars().next() {
@@ -633,7 +689,7 @@ pub(super) fn tag_match_rank(name_lower: &str, fragment_lower: &str) -> Option<u
     }
 
     // every letter of the fragment must be found, in order
-    for wanted in fragment_chars.by_ref() {
+    for wanted in fragment_chars {
         loop {
             match name_chars.next() {
                 Some(c) if c == wanted => break,
@@ -643,7 +699,7 @@ pub(super) fn tag_match_rank(name_lower: &str, fragment_lower: &str) -> Option<u
         }
     }
 
-    Some(1)
+    Some(3)
 }
 
 fn split_tags_input(tags_value: &str) -> (Vec<String>, String) {
@@ -712,6 +768,10 @@ impl Model {
             edit_original_title: None,
             edit_original_tags: None,
             global_tags_mode: false,
+            starred_tags: HashSet::new(),
+            showing_starred_tags: false,
+            related_tags: None,
+            pending_bookmark_tag: None,
             rename_tag_original: String::new(),
             rename_tag_input: Input::default(),
             rename_tag_suggestions: vec![],
@@ -897,6 +957,9 @@ impl Model {
                 // - make sure no leftover "all databases" mode from a
                 // previous visit via "T" carries over.
                 self.global_tags_mode = false;
+                self.showing_starred_tags = false;
+                self.related_tags = None;
+                self.tag_search_input.reset();
                 Some(Command::FetchTags)
             }
             ActivePane::FolderList | ActivePane::FolderContents => None,
@@ -950,6 +1013,8 @@ impl Model {
             search_scope: self.search_scope,
             search_input: self.search_input.clone(),
             global_tags_mode: self.global_tags_mode,
+            showing_starred_tags: self.showing_starred_tags,
+            related_tags: self.related_tags.clone(),
         }
     }
 
@@ -1154,6 +1219,8 @@ impl Model {
             self.search_scope = snapshot.search_scope;
             self.search_input = snapshot.search_input;
             self.global_tags_mode = snapshot.global_tags_mode;
+            self.showing_starred_tags = snapshot.showing_starred_tags;
+            self.related_tags = snapshot.related_tags;
             self.active_pane = snapshot.pane;
             self.sync_starred_markers();
             self.search_results_from_home = false;
@@ -1355,15 +1422,15 @@ impl Model {
         let query = self.tag_search_input.value().trim().to_lowercase();
 
         let filtered: Vec<TagStats> = if query.is_empty() {
-            self.all_tag_items.clone()
+            self.visible_tag_pool()
         } else {
-            self.all_tag_items
+            self.visible_tag_pool()
                 .iter()
                 .filter(|t| {
                     let name_lower = t.name.to_lowercase();
                     // anywhere in the name, or the letters in order from
                     // the first one (eg. "leanet" -> "learn_networking")
-                    name_lower.contains(&query) || tag_match_rank(&name_lower, &query).is_some()
+                    tag_match_rank(&name_lower, &query).is_some()
                 })
                 .cloned()
                 .collect()
@@ -1372,9 +1439,112 @@ impl Model {
         self.tag_items = TagItems::from(filtered);
     }
 
+    /// Every tag that may be listed right now: all of them, or only the
+    /// starred ones while `S` is on. The tag search narrows this down.
+    fn visible_tag_pool(&self) -> Vec<TagStats> {
+        self.all_tag_items
+            .iter()
+            .filter(|t| !self.showing_starred_tags || self.starred_tags.contains(&t.name))
+            .cloned()
+            .collect()
+    }
+
+    /// Stores freshly fetched tags and lists them (only the starred ones
+    /// while `S` is on).
+    pub(super) fn set_all_tag_items(&mut self, tags: Vec<TagStats>) {
+        self.all_tag_items = tags;
+        self.tag_items = TagItems::from(self.visible_tag_pool());
+    }
+
+    /// Ctrl+T in a tag's bookmark list: the command that finds every tag
+    /// connected to that tag. `None` (with a hint) when the list on screen
+    /// isn't "the bookmarks of a tag".
+    pub(super) fn request_related_tags(&mut self) -> Option<Command> {
+        if self.active_pane != ActivePane::List {
+            return None;
+        }
+
+        match self.bookmark_items.tag.clone() {
+            Some(tag) => Some(Command::FetchRelatedTags(tag)),
+            None => {
+                self.user_message = Some(UserMessage::info(
+                    "Ctrl+T works on a tag's bookmarks: open the Tags List, press Enter on a tag, then Ctrl+T",
+                ));
+                None
+            }
+        }
+    }
+
+    /// Lists the tags connected to `origin` (nearest first) in the Tags List
+    /// view, across every database.
+    pub(super) fn show_related_tags(&mut self, origin: String, related: Vec<RelatedTag>) {
+        let hops = related.iter().map(|r| (r.name.clone(), r.hops)).collect();
+        let tags: Vec<TagStats> = related
+            .into_iter()
+            .map(|r| TagStats {
+                name: r.name,
+                num_bookmarks: r.num_bookmarks,
+            })
+            .collect();
+
+        // "all databases" mode: Enter shows the tag's bookmarks from every
+        // database, `*` stars it everywhere, Alt+e renames it everywhere
+        self.global_tags_mode = true;
+        self.showing_starred_tags = false;
+        self.tag_search_input.reset();
+        self.related_tags = Some(RelatedTagsInfo { origin, hops });
+        self.set_all_tag_items(tags);
+        self.active_pane = ActivePane::TagsList;
+    }
+
+    /// `*` in the Tags List view: what starring the tag under the cursor
+    /// should do - the opposite of its current state.
+    pub(super) fn request_toggle_tag_star(&self) -> Option<Command> {
+        if self.active_pane != ActivePane::TagsList {
+            return None;
+        }
+
+        let index = self.tag_items.state.selected()?;
+        let name = self.tag_items.items.get(index)?.name.clone();
+        let starred = !self.starred_tags.contains(&name);
+
+        Some(Command::SetTagStarred {
+            name,
+            starred,
+            all_databases: self.global_tags_mode,
+        })
+    }
+
+    /// Remembers the new star state of a tag. While only starred tags are
+    /// listed, an unstarred tag disappears from the list right away (the
+    /// cursor stays where it was).
+    pub(super) fn apply_tag_star(&mut self, name: &str, starred: bool) {
+        if starred {
+            self.starred_tags.insert(name.to_string());
+            return;
+        }
+
+        self.starred_tags.remove(name);
+
+        if self.showing_starred_tags {
+            let selected = self.tag_items.state.selected().unwrap_or(0);
+            self.tag_items.items.retain(|t| t.name != name);
+
+            let last = self.tag_items.items.len().checked_sub(1);
+            self.tag_items.state.select(last.map(|l| selected.min(l)));
+        }
+    }
+
+    /// `S` in the Tags List view: only starred tags, or (again) all tags.
+    /// A tag search that's already applied keeps narrowing the list.
+    pub(super) fn toggle_starred_tags_filter(&mut self) {
+        self.showing_starred_tags = !self.showing_starred_tags;
+        self.filter_tags();
+    }
+
     pub(super) fn cancel_tag_search(&mut self) {
         self.tag_search_input.reset();
-        self.tag_items = TagItems::from(self.all_tag_items.clone());
+        self.tag_items = TagItems::from(self.visible_tag_pool());
         // back to the tags list the search was started from
         self.active_pane = ActivePane::TagsList;
     }
@@ -2422,7 +2592,7 @@ impl Model {
                     // anywhere in the name, or the letters in order from
                     // the first one (eg. "ledata" -> "learn_database"),
                     // same as searching tags
-                    name_lower.contains(&query) || tag_match_rank(&name_lower, &query).is_some()
+                    tag_match_rank(&name_lower, &query).is_some()
                 })
                 .cloned()
                 .collect()
@@ -3319,6 +3489,9 @@ impl Model {
         self.starred_uris = HashSet::new();
         self.showing_starred = false;
         self.global_tags_mode = false;
+        self.starred_tags = HashSet::new();
+        self.showing_starred_tags = false;
+        self.related_tags = None;
         self.marked_uris = HashSet::new();
         self.move_pending = vec![];
     }
@@ -3504,32 +3677,270 @@ mod tag_match_tests {
     }
 
     #[test]
-    fn letters_further_along_in_order_also_match() {
-        assert_eq!(tag_match_rank("learn_networking", "leanet"), Some(1));
-        assert_eq!(tag_match_rank("learn_networking", "lework"), Some(1));
-        assert_eq!(tag_match_rank("learn_networking", "learking"), Some(1));
-        assert_eq!(tag_match_rank("learn_networking", "leaworking"), Some(1));
+    fn a_word_inside_the_name_matches() {
+        // "dp" is a word of "edit_dp" - it must show up even though the
+        // name doesn't start with it
+        assert_eq!(tag_match_rank("edit_dp", "dp"), Some(1));
+        assert_eq!(tag_match_rank("learn_networking", "net"), Some(1));
+        assert_eq!(tag_match_rank("video-editing", "edit"), Some(1));
     }
 
     #[test]
-    fn must_start_with_the_same_letter_and_keep_order() {
-        assert_eq!(tag_match_rank("learn_networking", "net"), None);
-        assert_eq!(tag_match_rank("learn_networking", "lwn"), Some(1));
+    fn text_in_the_middle_of_a_word_still_matches_but_ranks_lower() {
+        assert_eq!(tag_match_rank("xdpx", "dp"), Some(2));
+        assert_eq!(tag_match_rank("learn_networking", "work"), Some(2));
+    }
+
+    #[test]
+    fn letters_further_along_in_order_also_match() {
+        assert_eq!(tag_match_rank("learn_networking", "leanet"), Some(3));
+        assert_eq!(tag_match_rank("learn_networking", "lework"), Some(3));
+        assert_eq!(tag_match_rank("learn_networking", "learking"), Some(3));
+        assert_eq!(tag_match_rank("learn_networking", "leaworking"), Some(3));
+        // "dp" finds "dopamine" too
+        assert_eq!(tag_match_rank("dopamine", "dp"), Some(3));
+    }
+
+    #[test]
+    fn scattered_letters_must_start_with_the_same_letter_and_keep_order() {
+        assert_eq!(tag_match_rank("learn_networking", "lwn"), Some(3));
         assert_eq!(tag_match_rank("learn_networking", "lnaer"), None);
         assert_eq!(tag_match_rank("learn_networking", "leaz"), None);
         assert_eq!(tag_match_rank("learn_networking", "x"), None);
+        // doesn't start with "e" and has no "ep" together
+        assert_eq!(tag_match_rank("learn_networking", "ek"), None);
+    }
+
+    #[test]
+    fn closer_matches_rank_better() {
+        let rank = |name: &str| tag_match_rank(name, "dp");
+
+        assert!(rank("dp_notes") < rank("edit_dp"));
+        assert!(rank("edit_dp") < rank("xdpx"));
+        assert!(rank("xdpx") < rank("dopamine"));
     }
 
     #[test]
     fn database_names_match_the_same_way() {
         // "le" + "data" typed together finds learn_database.db
-        assert_eq!(tag_match_rank("learn_database.db", "ledata"), Some(1));
-        assert_eq!(tag_match_rank("learn_database.db", "data"), None);
+        assert_eq!(tag_match_rank("learn_database.db", "ledata"), Some(3));
+        // a word of the name works too
+        assert_eq!(tag_match_rank("learn_database.db", "data"), Some(1));
     }
 
     #[test]
     fn works_with_emoji_and_other_scripts() {
-        assert_eq!(tag_match_rank("🔥cool_stuff", "🔥st"), Some(1));
-        assert_eq!(tag_match_rank("सुरक्षा", "सक"), Some(1));
+        assert_eq!(tag_match_rank("🔥cool_stuff", "🔥st"), Some(3));
+        assert_eq!(tag_match_rank("सुरक्षा", "सक"), Some(3));
+        assert_eq!(tag_match_rank("🔥cool_stuff", "stuff"), Some(1));
+    }
+}
+
+#[cfg(test)]
+mod starred_tag_tests {
+    use super::*;
+
+    async fn model_with_tags(names: &[&str], starred: &[&str]) -> Model {
+        let pool = sqlx::SqlitePool::connect("sqlite://:memory:")
+            .await
+            .expect("in-memory pool should open");
+        let mut model = Model::default(
+            &pool,
+            TuiContext::Tags,
+            TerminalDimensions {
+                width: 200,
+                height: 60,
+            },
+            "bmm.db".to_string(),
+        );
+
+        model.starred_tags = starred.iter().map(|s| s.to_string()).collect();
+        model.set_all_tag_items(
+            names
+                .iter()
+                .map(|n| TagStats {
+                    name: n.to_string(),
+                    num_bookmarks: 1,
+                })
+                .collect(),
+        );
+        model.active_pane = ActivePane::TagsList;
+        model
+    }
+
+    fn listed(model: &Model) -> Vec<String> {
+        model.tag_items.items.iter().map(|t| t.name.clone()).collect()
+    }
+
+    #[tokio::test]
+    async fn s_shows_only_starred_tags_and_back() {
+        let mut model = model_with_tags(&["a", "b", "c"], &["b"]).await;
+        assert_eq!(listed(&model), ["a", "b", "c"]);
+
+        model.toggle_starred_tags_filter();
+        assert_eq!(listed(&model), ["b"]);
+
+        model.toggle_starred_tags_filter();
+        assert_eq!(listed(&model), ["a", "b", "c"]);
+    }
+
+    #[tokio::test]
+    async fn starred_filter_keeps_applying_to_freshly_fetched_tags() {
+        let mut model = model_with_tags(&["a", "b", "c"], &["c"]).await;
+        model.toggle_starred_tags_filter();
+
+        model.set_all_tag_items(vec![
+            TagStats { name: "a".into(), num_bookmarks: 1 },
+            TagStats { name: "c".into(), num_bookmarks: 2 },
+        ]);
+
+        assert_eq!(listed(&model), ["c"]);
+    }
+
+    #[tokio::test]
+    async fn starred_filter_and_tag_search_work_together() {
+        let mut model = model_with_tags(&["rust", "rustacean", "learn"], &["rust", "learn"]).await;
+
+        model.toggle_starred_tags_filter();
+        model.tag_search_input = Input::new("ru".to_string());
+        model.filter_tags();
+
+        assert_eq!(listed(&model), ["rust"]);
+
+        model.cancel_tag_search();
+        assert_eq!(listed(&model), ["rust", "learn"]);
+    }
+
+    #[tokio::test]
+    async fn star_key_asks_for_the_opposite_of_the_current_state() {
+        let mut model = model_with_tags(&["a", "b"], &["b"]).await;
+
+        model.tag_items.state.select(Some(0));
+        assert!(matches!(
+            model.request_toggle_tag_star(),
+            Some(Command::SetTagStarred { ref name, starred: true, all_databases: false })
+                if name == "a"
+        ));
+
+        model.tag_items.state.select(Some(1));
+        assert!(matches!(
+            model.request_toggle_tag_star(),
+            Some(Command::SetTagStarred { ref name, starred: false, .. }) if name == "b"
+        ));
+
+        // the "T" view stars the tag in every database
+        model.global_tags_mode = true;
+        assert!(matches!(
+            model.request_toggle_tag_star(),
+            Some(Command::SetTagStarred { all_databases: true, .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn unstarring_while_only_starred_are_listed_removes_the_tag() {
+        let mut model = model_with_tags(&["a", "b", "c"], &["a", "b", "c"]).await;
+        model.toggle_starred_tags_filter();
+        model.tag_items.state.select(Some(2));
+
+        model.apply_tag_star("c", false);
+
+        assert_eq!(listed(&model), ["a", "b"]);
+        assert_eq!(model.tag_items.state.selected(), Some(1));
+        assert!(!model.starred_tags.contains("c"));
+
+        // starring it again just records it
+        model.apply_tag_star("c", true);
+        assert!(model.starred_tags.contains("c"));
+    }
+
+    fn related(name: &str, hops: usize, num_bookmarks: i64) -> RelatedTag {
+        RelatedTag {
+            name: name.to_string(),
+            hops,
+            num_bookmarks,
+        }
+    }
+
+    #[tokio::test]
+    async fn ctrl_t_only_works_on_the_bookmarks_of_a_tag() {
+        let mut model = model_with_tags(&["a"], &[]).await;
+        model.active_pane = ActivePane::List;
+
+        // a plain list: nothing to look up, and the user is told why
+        assert!(model.request_related_tags().is_none());
+        assert!(model.user_message.is_some());
+
+        // the bookmarks of tag "cyber"
+        model.bookmark_items.tag = Some("cyber".to_string());
+        assert!(matches!(
+            model.request_related_tags(),
+            Some(Command::FetchRelatedTags(ref t)) if t == "cyber"
+        ));
+
+        // any new list (search, starred, ...) forgets the tag
+        model.bookmark_items = BookmarkItems::from(Vec::<SavedBookmark>::new());
+        assert!(model.bookmark_items.tag.is_none());
+        assert!(model.request_related_tags().is_none());
+    }
+
+    #[tokio::test]
+    async fn related_tags_are_listed_nearest_first_across_databases() {
+        let mut model = model_with_tags(&["x"], &[]).await;
+        model.active_pane = ActivePane::List;
+        model.bookmark_items.tag = Some("cyber".to_string());
+
+        model.show_related_tags(
+            "cyber".to_string(),
+            vec![related("cyber", 0, 2), related("hacking", 1, 3), related("ctf", 2, 1)],
+        );
+
+        assert_eq!(model.active_pane, ActivePane::TagsList);
+        assert_eq!(listed(&model), ["cyber", "hacking", "ctf"]);
+        assert!(model.global_tags_mode, "Enter must search every database");
+
+        let info = model.related_tags.as_ref().unwrap();
+        assert_eq!(info.origin, "cyber");
+        assert_eq!(info.hops["ctf"], 2);
+
+        // the list works like any tags list: stars and the starred filter
+        model.starred_tags.insert("ctf".to_string());
+        model.toggle_starred_tags_filter();
+        assert_eq!(listed(&model), ["ctf"]);
+    }
+
+    #[tokio::test]
+    async fn opening_the_plain_tags_list_leaves_the_related_view() {
+        let mut model = model_with_tags(&["x"], &[]).await;
+        model.show_related_tags("cyber".to_string(), vec![related("cyber", 0, 1)]);
+        model.active_pane = ActivePane::List;
+
+        let cmd = model.show_view(ActivePane::TagsList);
+
+        assert!(matches!(cmd, Some(Command::FetchTags)));
+        assert!(model.related_tags.is_none());
+        assert!(!model.global_tags_mode);
+    }
+
+    #[tokio::test]
+    async fn suggestions_include_tags_with_the_typed_word_inside() {
+        let mut model = model_with_tags(&["dopamine", "edit_dp", "dp_notes", "unrelated"], &[]).await;
+        model.active_pane = ActivePane::EditBookmark;
+        model.edit_focus = EditField::Tags;
+        model.edit_tags_input = Input::new("dp".to_string());
+
+        model.recompute_tag_suggestions();
+
+        // starts with it, then a word of the tag, then the looser match
+        assert_eq!(model.tag_suggestions, ["dp_notes", "edit_dp", "dopamine"]);
+    }
+
+    #[tokio::test]
+    async fn tag_search_finds_the_same_tags() {
+        let mut model = model_with_tags(&["dopamine", "edit_dp", "dp_notes", "unrelated"], &[]).await;
+        model.tag_search_input = Input::new("dp".to_string());
+
+        model.filter_tags();
+
+        assert_eq!(listed(&model), ["dopamine", "edit_dp", "dp_notes"]);
     }
 }
