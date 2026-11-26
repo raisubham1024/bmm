@@ -986,8 +986,10 @@ fn render_edit_tags_field(model: &Model, frame: &mut Frame, chunk: Rect) {
     let width = chunk.width.max(3) - 3;
     let scroll = model.edit_tags_input.visual_scroll(width as usize);
 
-    let title = if focused {
-        " Tags, comma separated (Alt+z: all tags, Tab: switch, Ctrl+s: save, Esc: cancel) "
+    let title = if focused && model.tag_suggest_other_dbs {
+        " Tags (Alt+t: ON - all databases, Alt+z: all tags, Tab: switch, Ctrl+s: save) "
+    } else if focused {
+        " Tags (Alt+t: other databases' tags, Alt+z: all tags, Tab: switch, Ctrl+s: save) "
     } else {
         " Tags, comma separated "
     };

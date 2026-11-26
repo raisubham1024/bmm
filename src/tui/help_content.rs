@@ -391,6 +391,10 @@ pub(super) const HELP_SECTIONS: &[HelpSection] = &[
                 "(Tags field) Alt+z",
                 "List ALL your tags as suggestions\n(matching ones first); pick several with\nUp/Down + Enter. Press again to go back\nto only the matching ones."
             ),
+            row!(
+                "(Tags field) Alt+t",
+                "Also suggest tags from your OTHER\ndatabases (off by default). Press again\nto go back to only this database's tags."
+            ),
             row!("Ctrl+s", "Save your changes (asks first)."),
             row!(
                 "(Title field) Alt+F",

@@ -885,6 +885,13 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
             model.start_add_new_bookmark();
             cmds.push(Command::FetchTags);
         }
+        Message::SuggestionTagsFetched(names) => {
+            model.other_db_tag_names = names;
+            // suggestions may already be showing - refresh them
+            if model.tag_suggest_other_dbs && model.edit_focus == EditField::Tags {
+                model.recompute_tag_suggestions();
+            }
+        }
         Message::EditFieldGotEvent(event) => match model.edit_focus {
             EditField::Uri => {
                 handle_input_event(&mut model.edit_uri_input, &event);
@@ -904,6 +911,12 @@ pub fn update(model: &mut Model, msg: Message) -> Vec<Command> {
         Message::AcceptTagSuggestion => model.accept_selected_tag_suggestion(),
         Message::DismissTagSuggestions => model.dismiss_tag_suggestions(),
         Message::ToggleAllTagSuggestions => model.toggle_all_tag_suggestions(),
+        Message::ToggleOtherDbTagSuggestions => {
+            if model.toggle_other_db_tag_suggestions() {
+                // fetched fresh each time it's switched on
+                cmds.push(Command::FetchSuggestionTags);
+            }
+        }
         Message::RequestSaveBookmarkEdit => {
             model.request_save_edit();
         }

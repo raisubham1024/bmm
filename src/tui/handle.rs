@@ -6,7 +6,7 @@ use crate::persistence::{
     DBError, SaveBookmarkOptions, count_bookmarks, create_or_update_bookmark,
     delete_bookmarks_with_uris, get_all_bookmarks, get_bookmark_with_exact_uri, get_bookmarks,
     get_bookmarks_by_query, get_bookmarks_with_notes, get_db_pool, get_note, get_starred_bookmarks,
-    get_starred_uris, get_tags_with_stats, rename_bookmark_uri, rename_tag_name, set_note,
+    get_starred_uris, get_tags, get_tags_with_stats, rename_bookmark_uri, rename_tag_name, set_note,
     set_starred, toggle_starred,
 };
 use sqlx::{Pool, Sqlite};
@@ -119,6 +119,26 @@ pub(super) async fn handle_command(
                     .collect();
 
                 let _ = event_tx.try_send(Message::GlobalTagsFetched(tags, errors));
+            });
+        }
+        Command::FetchSuggestionTags => {
+            tokio::spawn(async move {
+                let mut names: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+
+                // a database that can't be read is just skipped - this only
+                // feeds suggestions, so it isn't worth an error popup
+                for (_name, path) in local_db_files() {
+                    if let Ok(db_pool) = get_db_pool(&path).await
+                        && let Ok(tags) = get_tags(&db_pool).await
+                    {
+                        names.extend(tags);
+                    }
+                }
+
+                let _ = event_tx.try_send(Message::SuggestionTagsFetched(
+                    names.into_iter().collect(),
+                ));
             });
         }
         Command::FetchBookmarksForTagAcrossDatabases(tag) => {

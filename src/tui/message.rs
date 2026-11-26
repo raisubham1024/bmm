@@ -38,6 +38,9 @@ pub enum Message {
     /// kicks off fetching tag stats aggregated across every local database.
     ShowGlobalTagsList,
     GlobalTagsFetched(Vec<TagStats>, Vec<String>),
+    /// Tag names from every local database - feeds the tag suggestions in
+    /// the add/edit bookmark screen (see `Command::FetchSuggestionTags`).
+    SuggestionTagsFetched(Vec<String>),
     /// Fired when a tag is selected from the Tags List view while it's in
     /// "all databases" mode - the cross-database counterpart to
     /// `BookmarksForTagFetched`. Carries (database display name, database
@@ -158,6 +161,8 @@ pub enum Message {
     EditFieldPrev,
     /// Alt+z in the tags field.
     ToggleAllTagSuggestions,
+    /// Alt+t in the tags field: include tags from every database.
+    ToggleOtherDbTagSuggestions,
     TagSuggestionNext,
     TagSuggestionPrev,
     AcceptTagSuggestion,
@@ -493,6 +498,14 @@ pub fn get_event_handling_msg(model: &Model, event: Event) -> Option<Message> {
                                 && model.edit_focus == EditField::Tags =>
                         {
                             Some(Message::ToggleAllTagSuggestions)
+                        }
+                        // Alt+t in the tags field: also suggest tags from
+                        // every other database; again, back to just this one
+                        KeyCode::Char('t')
+                            if key_event.modifiers.contains(KeyModifiers::ALT)
+                                && model.edit_focus == EditField::Tags =>
+                        {
+                            Some(Message::ToggleOtherDbTagSuggestions)
                         }
                         // While the tags field has live suggestions
                         // showing, Up/Down/Enter/Esc control the

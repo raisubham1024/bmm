@@ -27,6 +27,10 @@ pub(super) enum Command {
     /// Fetches tag stats aggregated across every local database, for the
     /// "all databases" Tags List view (`T`).
     FetchGlobalTags,
+    /// Fetches just the tag *names* from every local database, so the
+    /// add/edit bookmark screen can suggest tags that exist in any
+    /// database, not only the active one.
+    FetchSuggestionTags,
     /// Fetches every bookmark tagged with the given tag across every local
     /// database - the "all databases" counterpart to `FetchBookmarksForTag`,
     /// used when a tag is selected from the `T` (global) Tags List view.

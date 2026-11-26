@@ -478,6 +478,13 @@ pub(super) struct Model {
     /// Alt+z in the tags field: list *every* existing tag instead of only
     /// the ones matching what's typed.
     pub(super) tag_suggest_all: bool,
+    /// Tag names from every local database (not just the active one),
+    /// used for the add/edit bookmark screen's tag suggestions. Filled by
+    /// `Command::FetchSuggestionTags`.
+    pub(super) other_db_tag_names: Vec<String>,
+    /// Alt+t in the tags field: also suggest tags from the other local
+    /// databases. Off by default each time the add/edit screen opens.
+    pub(super) tag_suggest_other_dbs: bool,
     pub(super) edit_original_title: Option<String>,
     pub(super) edit_original_tags: Option<String>,
     /// Whether the Tags List view is currently showing tags aggregated
@@ -700,6 +707,8 @@ impl Model {
             tag_suggestions: vec![],
             tag_suggestion_selected: None,
             tag_suggest_all: false,
+            other_db_tag_names: vec![],
+            tag_suggest_other_dbs: false,
             edit_original_title: None,
             edit_original_tags: None,
             global_tags_mode: false,
@@ -1526,6 +1535,7 @@ impl Model {
         self.edit_original_title = None;
         self.edit_original_tags = None;
         self.edit_focus = EditField::Uri;
+        self.tag_suggest_other_dbs = false;
         self.dismiss_tag_suggestions();
         self.active_pane = ActivePane::EditBookmark;
     }
@@ -1558,7 +1568,8 @@ impl Model {
             self.edit_original_title = title;
             self.edit_original_tags = tags;
             self.edit_focus = EditField::Title;
-            self.dismiss_tag_suggestions();
+            self.tag_suggest_other_dbs = false;
+        self.dismiss_tag_suggestions();
             self.active_pane = ActivePane::EditBookmark;
         }
     }
@@ -1618,6 +1629,24 @@ impl Model {
     /// keystroke while the Tags field is focused, so suggestions stay
     /// live as the user types (matching bmm's existing already-saved
     /// tags, via `all_tag_items`, which is kept fresh by `Command::FetchTags`).
+    /// Every tag name worth suggesting in the add/edit screen: the active
+    /// database's tags plus the ones from all other local databases, each
+    /// name once (case-insensitive).
+    fn tag_suggestion_pool(&self) -> Vec<String> {
+        let mut seen: HashSet<String> = HashSet::new();
+        self.all_tag_items
+            .iter()
+            .map(|t| t.name.clone())
+            .chain(
+                self.other_db_tag_names
+                    .iter()
+                    .filter(|_| self.tag_suggest_other_dbs)
+                    .cloned(),
+            )
+            .filter(|name| seen.insert(name.to_lowercase()))
+            .collect()
+    }
+
     pub(super) fn recompute_tag_suggestions(&mut self) {
         let (completed, fragment) = split_tags_input(self.edit_tags_input.value());
 
@@ -1629,9 +1658,8 @@ impl Model {
                 completed.iter().map(|t| t.to_lowercase()).collect();
 
             let mut all: Vec<String> = self
-                .all_tag_items
-                .iter()
-                .map(|t| t.name.clone())
+                .tag_suggestion_pool()
+                .into_iter()
                 .filter(|name| !completed_lower.contains(&name.to_lowercase()))
                 .collect();
 
@@ -1661,9 +1689,8 @@ impl Model {
             completed.iter().map(|t| t.to_lowercase()).collect();
 
         let mut matches: Vec<String> = self
-            .all_tag_items
-            .iter()
-            .map(|t| t.name.clone())
+            .tag_suggestion_pool()
+            .into_iter()
             .filter(|name| {
                 let name_lower = name.to_lowercase();
                 tag_match_rank(&name_lower, &fragment_lower).is_some()
@@ -1926,6 +1953,15 @@ impl Model {
         } else {
             self.dismiss_tag_suggestions();
         }
+    }
+
+    /// Alt+t in the tags field: also suggest tags from the other local
+    /// databases, or (pressed again) only the active database's tags.
+    /// Returns true when the other databases' tags need fetching.
+    pub(super) fn toggle_other_db_tag_suggestions(&mut self) -> bool {
+        self.tag_suggest_other_dbs = !self.tag_suggest_other_dbs;
+        self.recompute_tag_suggestions();
+        self.tag_suggest_other_dbs
     }
 
     /// Alt+z in the tags field: show every existing tag as a suggestion,
